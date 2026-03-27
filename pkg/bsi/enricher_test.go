@@ -5,6 +5,9 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/anchore/syft/syft/pkg"
+	"github.com/anchore/syft/syft/sbom"
 )
 
 func TestEnricherSPDX(t *testing.T) {
@@ -62,6 +65,122 @@ github.com/google/uuid v1.6.0 h1:abcd1234
 	checksums := pkg["checksums"].([]interface{})
 	if len(checksums) == 0 {
 		t.Error("Expected checksums to be added")
+	}
+}
+
+func TestEnrichSBOMModel(t *testing.T) {
+	// Create temp directory with go.sum
+	tmpDir := t.TempDir()
+	goSumContent := `github.com/spf13/cobra v1.10.2 h1:test123hash
+github.com/google/uuid v1.6.0 h1:abcd1234hash
+`
+	goSumPath := filepath.Join(tmpDir, "go.sum")
+	if err := os.WriteFile(goSumPath, []byte(goSumContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	enricher := NewEnricher(tmpDir)
+
+	// Create a mock SBOM model
+	sbomModel := &sbom.SBOM{
+		Artifacts: sbom.Artifacts{
+			Packages: pkg.NewCollection(),
+		},
+	}
+
+	// Add test packages
+	testPkg1 := pkg.Package{
+		Name:     "github.com/spf13/cobra",
+		Version:  "v1.10.2",
+		Type:     pkg.GoModulePkg,
+		Licenses: pkg.NewLicenseSet(),
+		Metadata: pkg.GolangModuleEntry{},
+	}
+	testPkg1.SetID()
+
+	testPkg2 := pkg.Package{
+		Name:     "github.com/google/uuid",
+		Version:  "v1.6.0",
+		Type:     pkg.GoModulePkg,
+		Licenses: pkg.NewLicenseSet(),
+		Metadata: pkg.GolangModuleEntry{},
+	}
+	testPkg2.SetID()
+
+	sbomModel.Artifacts.Packages.Add(testPkg1)
+	sbomModel.Artifacts.Packages.Add(testPkg2)
+
+	// Enrich the model
+	enrichedModel, err := enricher.EnrichSBOMModel(sbomModel)
+	if err != nil {
+		t.Fatalf("EnrichSBOMModel failed: %v", err)
+	}
+
+	// Verify enrichment
+	packages := enrichedModel.Artifacts.Packages.Sorted()
+	if len(packages) != 2 {
+		t.Fatalf("Expected 2 packages, got %d", len(packages))
+	}
+
+	// Find cobra package
+	var cobraPkg *pkg.Package
+	for i := range packages {
+		if packages[i].Name == "github.com/spf13/cobra" {
+			cobraPkg = &packages[i]
+			break
+		}
+	}
+
+	if cobraPkg == nil {
+		t.Fatal("Could not find cobra package")
+	}
+
+	// Check cobra package license
+	if cobraPkg.Licenses.Empty() {
+		t.Error("Expected licenses to be enriched for cobra")
+	} else {
+		licenses := cobraPkg.Licenses.ToSlice()
+		foundApache := false
+		for _, lic := range licenses {
+			if lic.SPDXExpression == "Apache-2.0" || lic.Value == "Apache-2.0" {
+				foundApache = true
+				break
+			}
+		}
+		if !foundApache {
+			t.Errorf("Expected Apache-2.0 license for cobra, got %v", licenses)
+		}
+	}
+
+	// Check hash enrichment for cobra
+	if meta, ok := cobraPkg.Metadata.(pkg.GolangModuleEntry); ok {
+		if meta.H1Digest != "test123hash" {
+			t.Errorf("Expected H1Digest to be 'test123hash' for cobra, got '%s'", meta.H1Digest)
+		}
+	} else {
+		t.Error("Expected metadata to be GolangModuleEntry")
+	}
+
+	// Find uuid package
+	var uuidPkg *pkg.Package
+	for i := range packages {
+		if packages[i].Name == "github.com/google/uuid" {
+			uuidPkg = &packages[i]
+			break
+		}
+	}
+
+	if uuidPkg == nil {
+		t.Fatal("Could not find uuid package")
+	}
+
+	// Check uuid package hash
+	if meta, ok := uuidPkg.Metadata.(pkg.GolangModuleEntry); ok {
+		if meta.H1Digest != "abcd1234hash" {
+			t.Errorf("Expected H1Digest to be 'abcd1234hash' for uuid, got '%s'", meta.H1Digest)
+		}
+	} else {
+		t.Error("Expected metadata to be GolangModuleEntry for uuid")
 	}
 }
 

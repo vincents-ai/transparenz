@@ -1,11 +1,9 @@
 package cmd
 
 import (
-	"bytes"
 	"context"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"time"
 
@@ -14,6 +12,7 @@ import (
 	"github.com/deutschland-stack/transparenz/internal/repository"
 	"github.com/deutschland-stack/transparenz/pkg/bsi"
 	"github.com/deutschland-stack/transparenz/pkg/database"
+	"github.com/deutschland-stack/transparenz/pkg/sbom"
 )
 
 var (
@@ -26,11 +25,10 @@ var (
 var generateCmd = &cobra.Command{
 	Use:   "generate [source]",
 	Short: "Generate SBOM for a source directory or container image",
-	Long: `Generate a Software Bill of Materials (SBOM) using Syft.
+	Long: `Generate a Software Bill of Materials (SBOM) using native Syft library.
 
-Week 1-2 Implementation: This version uses the syft binary as a bridge while we
-set up the native Go library integration. Full native integration will be completed
-in subsequent iterations.
+Native Go Implementation: This version uses the Syft Go library directly for 
+optimal performance and eliminates subprocess overhead.
 
 Supports multiple formats:
   - SPDX JSON (default)
@@ -52,68 +50,68 @@ Example usage:
 
 		startTime := time.Now()
 
-		// Check if source exists (for file/directory paths)
-		if _, err := os.Stat(sourcePath); err != nil {
-			// Might be a container image reference, proceed anyway
-			if verbose {
-				fmt.Fprintf(os.Stderr, "Source is not a file/directory, assuming container image reference\n")
-			}
-		}
-
-		// Determine Syft output format
-		var syftFormat string
+		// Normalize format string
+		var format string
 		switch generateFormat {
 		case "spdx", "spdx-json":
-			syftFormat = "spdx-json"
+			format = "spdx"
 		case "cyclonedx", "cyclonedx-json":
-			syftFormat = "cyclonedx-json"
+			format = "cyclonedx"
 		default:
 			return fmt.Errorf("unsupported format: %s (use 'spdx' or 'cyclonedx')", generateFormat)
 		}
 
-		// Build syft command
-		syftArgs := []string{"scan", sourcePath, "-o", syftFormat}
+		// Create SBOM generator with native Syft library
+		generator := sbom.NewGenerator(verbose)
 
-		if verbose {
-			syftArgs = append(syftArgs, "-v")
+		ctx := context.Background()
+		var output string
+
+		// If BSI compliance is requested, use native model enrichment
+		if generateBSICompliant {
+			if verbose {
+				fmt.Fprintf(os.Stderr, "Generating SBOM model for BSI enrichment...\n")
+			}
+
+			// Get the native SBOM model
+			sbomModel, _, err := generator.GetSBOMModel(ctx, sourcePath)
+			if err != nil {
+				return fmt.Errorf("failed to generate SBOM model: %w", err)
+			}
+
+			if verbose {
+				fmt.Fprintf(os.Stderr, "Applying BSI TR-03183-2 enrichment to model...\n")
+			}
+
+			// Enrich the native model
+			enricher := bsi.NewEnricher(sourcePath)
+			enrichedModel, err := enricher.EnrichSBOMModel(sbomModel)
+			if err != nil {
+				return fmt.Errorf("failed to enrich SBOM model: %w", err)
+			}
+
+			if verbose {
+				fmt.Fprintf(os.Stderr, "BSI enrichment complete, formatting output...\n")
+			}
+
+			// Format the enriched model to string
+			outputBytes, err := generator.FormatSBOM(enrichedModel, format)
+			if err != nil {
+				return fmt.Errorf("failed to format enriched SBOM: %w", err)
+			}
+			output = string(outputBytes)
+		} else {
+			// Standard generation without enrichment
+			var err error
+			output, err = generator.Generate(ctx, sourcePath, format)
+			if err != nil {
+				return fmt.Errorf("failed to generate SBOM: %w", err)
+			}
 		}
-
-		// Execute syft
-		syftCmd := exec.Command("syft", syftArgs...)
-
-		// Capture stdout and stderr separately
-		var stdout, stderr bytes.Buffer
-		syftCmd.Stdout = &stdout
-		syftCmd.Stderr = &stderr
-
-		err := syftCmd.Run()
-		if err != nil {
-			return fmt.Errorf("failed to generate SBOM: %w\nError: %s", err, stderr.String())
-		}
-
-		output := stdout.Bytes()
 
 		if verbose {
 			fmt.Fprintf(os.Stderr, "SBOM generated in %.2f seconds\n",
 				time.Since(startTime).Seconds())
-		}
-
-		// Apply BSI enrichment if requested
-		if generateBSICompliant {
-			if verbose {
-				fmt.Fprintf(os.Stderr, "Applying BSI TR-03183-2 enrichment...\n")
-			}
-
-			enricher := bsi.NewEnricher(sourcePath)
-			enriched, err := enricher.EnrichSBOM(string(output))
-			if err != nil {
-				return fmt.Errorf("failed to enrich SBOM: %w", err)
-			}
-			output = []byte(enriched)
-
-			if verbose {
-				fmt.Fprintf(os.Stderr, "BSI enrichment complete\n")
-			}
 		}
 
 		// Write to file or stdout
@@ -123,7 +121,7 @@ Example usage:
 				return fmt.Errorf("failed to resolve output path: %w", err)
 			}
 
-			err = os.WriteFile(absPath, output, 0644)
+			err = os.WriteFile(absPath, []byte(output), 0644)
 			if err != nil {
 				return fmt.Errorf("failed to write output file: %w", err)
 			}
@@ -134,7 +132,7 @@ Example usage:
 
 			fmt.Printf("SBOM successfully written to %s\n", absPath)
 		} else {
-			fmt.Println(string(output))
+			fmt.Println(output)
 		}
 
 		// Save to database if requested
@@ -150,7 +148,7 @@ Example usage:
 			defer database.Close(db)
 
 			repo := repository.NewSBOMRepository(db)
-			sbomID, err := repo.SaveSBOM(context.Background(), string(output), sourcePath)
+			sbomID, err := repo.SaveSBOM(context.Background(), output, sourcePath)
 			if err != nil {
 				return fmt.Errorf("failed to save SBOM to database: %w", err)
 			}
