@@ -155,12 +155,41 @@ func (s *Scanner) Scan(ctx context.Context, sbomModel *sbom.SBOM) (*ScanResult, 
 
 // convertMatch converts a Grype match to our VulnerabilityMatch format
 func (s *Scanner) convertMatch(m match.Match) VulnerabilityMatch {
+	// Extract metadata
+	severity := "Unknown"
+	description := ""
+	var cvssScores []CVSS
+	var urls []string
+
+	if m.Vulnerability.Metadata != nil {
+		if m.Vulnerability.Metadata.Severity != "" {
+			severity = m.Vulnerability.Metadata.Severity
+		}
+		if m.Vulnerability.Metadata.Description != "" {
+			description = m.Vulnerability.Metadata.Description
+		}
+		// Extract CVSS scores
+		for _, cvssData := range m.Vulnerability.Metadata.Cvss {
+			cvssScores = append(cvssScores, CVSS{
+				Version: cvssData.Version,
+				Vector:  cvssData.Vector,
+				Score:   cvssData.Metrics.BaseScore,
+			})
+		}
+	}
+
+	// Convert related vulnerabilities to URLs
+	for _, ref := range m.Vulnerability.RelatedVulnerabilities {
+		urls = append(urls, ref.ID)
+	}
+
 	vuln := VulnerabilityMatch{
 		Vulnerability: Vulnerability{
 			ID:          m.Vulnerability.ID,
-			Severity:    string(m.Vulnerability.Severity),
-			Description: m.Vulnerability.Description,
-			URLs:        m.Vulnerability.RelatedVulnerabilities,
+			Severity:    severity,
+			Description: description,
+			URLs:        urls,
+			CVSS:        cvssScores,
 		},
 		Package: Package{
 			Name:    m.Package.Name,
@@ -169,15 +198,6 @@ func (s *Scanner) convertMatch(m match.Match) VulnerabilityMatch {
 			PURL:    m.Package.PURL,
 		},
 		MatchDetails: make([]MatchDetail, 0),
-	}
-
-	// Add CVSS scores if available
-	for _, cvss := range m.Vulnerability.Cvss {
-		vuln.Vulnerability.CVSS = append(vuln.Vulnerability.CVSS, CVSS{
-			Version: cvss.Version,
-			Vector:  cvss.Vector,
-			Score:   cvss.Metrics.BaseScore,
-		})
 	}
 
 	// Add match details

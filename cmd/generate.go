@@ -67,39 +67,33 @@ Example usage:
 		ctx := context.Background()
 		var output string
 
-		// If BSI compliance is requested, use native model enrichment
+		// If BSI compliance is requested, generate SBOM then enrich JSON
 		if generateBSICompliant {
 			if verbose {
-				fmt.Fprintf(os.Stderr, "Generating SBOM model for BSI enrichment...\n")
+				fmt.Fprintf(os.Stderr, "Generating SBOM...\n")
 			}
 
-			// Get the native SBOM model
-			sbomModel, _, err := generator.GetSBOMModel(ctx, sourcePath)
+			// Generate SBOM using standard path
+			var err error
+			output, err = generator.Generate(ctx, sourcePath, format)
 			if err != nil {
-				return fmt.Errorf("failed to generate SBOM model: %w", err)
+				return fmt.Errorf("failed to generate SBOM: %w", err)
 			}
 
 			if verbose {
-				fmt.Fprintf(os.Stderr, "Applying BSI TR-03183-2 enrichment to model...\n")
+				fmt.Fprintf(os.Stderr, "Applying BSI TR-03183-2 enrichment...\n")
 			}
 
-			// Enrich the native model
+			// Enrich the JSON output
 			enricher := bsi.NewEnricher(sourcePath)
-			enrichedModel, err := enricher.EnrichSBOMModel(sbomModel)
+			output, err = enricher.EnrichSBOM(output)
 			if err != nil {
-				return fmt.Errorf("failed to enrich SBOM model: %w", err)
+				return fmt.Errorf("failed to enrich SBOM: %w", err)
 			}
 
 			if verbose {
-				fmt.Fprintf(os.Stderr, "BSI enrichment complete, formatting output...\n")
+				fmt.Fprintf(os.Stderr, "BSI enrichment complete\n")
 			}
-
-			// Format the enriched model to string
-			outputBytes, err := generator.FormatSBOM(enrichedModel, format)
-			if err != nil {
-				return fmt.Errorf("failed to format enriched SBOM: %w", err)
-			}
-			output = string(outputBytes)
 		} else {
 			// Standard generation without enrichment
 			var err error
