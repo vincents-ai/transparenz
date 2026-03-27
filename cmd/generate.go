@@ -12,6 +12,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/deutschland-stack/transparenz/internal/repository"
+	"github.com/deutschland-stack/transparenz/pkg/bsi"
 	"github.com/deutschland-stack/transparenz/pkg/database"
 )
 
@@ -100,7 +101,18 @@ Example usage:
 		// Apply BSI enrichment if requested
 		if generateBSICompliant {
 			if verbose {
-				fmt.Fprintf(os.Stderr, "BSI TR-03183-2 enrichment will be implemented in Week 5-6\n")
+				fmt.Fprintf(os.Stderr, "Applying BSI TR-03183-2 enrichment...\n")
+			}
+
+			enricher := bsi.NewEnricher(sourcePath)
+			enriched, err := enricher.EnrichSBOM(string(output))
+			if err != nil {
+				return fmt.Errorf("failed to enrich SBOM: %w", err)
+			}
+			output = []byte(enriched)
+
+			if verbose {
+				fmt.Fprintf(os.Stderr, "BSI enrichment complete\n")
 			}
 		}
 
