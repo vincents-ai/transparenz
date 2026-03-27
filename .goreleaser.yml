@@ -1,0 +1,91 @@
+# GoReleaser configuration for Transparenz Go
+# Builds multi-platform binaries for Linux, macOS, Windows
+
+version: 2
+
+before:
+  hooks:
+    - go mod tidy
+    - go mod download
+
+builds:
+  - id: transparenz
+    main: ./cmd/transparenz/main.go
+    binary: transparenz
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w
+      - -X main.version={{.Version}}
+      - -X main.commit={{.Commit}}
+      - -X main.date={{.Date}}
+    mod_timestamp: '{{ .CommitTimestamp }}'
+
+archives:
+  - id: transparenz-archive
+    name_template: 'transparenz_{{ .Version }}_{{ .Os }}_{{ .Arch }}'
+    format_overrides:
+      - goos: windows
+        format: zip
+    files:
+      - README.md
+      - LICENSE
+      - docs/*
+
+checksum:
+  name_template: 'checksums.txt'
+
+snapshot:
+  version_template: "{{ .Tag }}-next"
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - '^docs:'
+      - '^test:'
+      - '^chore:'
+      - Merge pull request
+      - Merge branch
+
+release:
+  github:
+    owner: deutschland-stack
+    name: transparenz
+  draft: false
+  prerelease: auto
+  name_template: "v{{.Version}}"
+
+dockers:
+  - image_templates:
+      - "ghcr.io/deutschland-stack/transparenz:{{ .Tag }}"
+      - "ghcr.io/deutschland-stack/transparenz:v{{ .Major }}"
+      - "ghcr.io/deutschland-stack/transparenz:latest"
+    dockerfile: Dockerfile
+    build_flag_templates:
+      - "--pull"
+      - "--label=org.opencontainers.image.created={{.Date}}"
+      - "--label=org.opencontainers.image.title={{.ProjectName}}"
+      - "--label=org.opencontainers.image.revision={{.FullCommit}}"
+      - "--label=org.opencontainers.image.version={{.Version}}"
+      - "--platform=linux/amd64"
+
+brews:
+  - name: transparenz
+    homepage: "https://github.com/deutschland-stack/transparenz"
+    description: "BSI TR-03183 compliant SBOM generator for Deutschland-Stack"
+    license: "Apache-2.0"
+    folder: Formula
+    repository:
+      owner: deutschland-stack
+      name: homebrew-tap
+    commit_author:
+      name: goreleaserbot
+      email: bot@goreleaser.com
