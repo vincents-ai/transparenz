@@ -53,29 +53,24 @@ Example usage:
 			return fmt.Errorf("SBOM file not found: %s", sbomPath)
 		}
 
-		// Read and parse SBOM
+		// Read SBOM file data
 		sbomData, err := os.ReadFile(sbomPath)
 		if err != nil {
 			return fmt.Errorf("failed to read SBOM file: %w", err)
 		}
 
-		// Create SBOM generator to parse the file
-		generator := sbom.NewGenerator(verbose)
-
-		// For now, we need to generate a fresh SBOM from the source
-		// TODO: Implement SBOM file parsing to reuse existing SBOM
-		// This requires detecting the format and parsing accordingly
+		// Parse existing SBOM file using the parser
+		parser := sbom.NewParser(verbose)
+		sbomModel, err := parser.ParseFile(sbomData)
+		if err != nil {
+			return fmt.Errorf("failed to parse SBOM file: %w", err)
+		}
 
 		// Create scanner with native Grype
 		scanner := scan.NewScanner(verbose)
 
-		// Generate SBOM model from source for scanning
-		// In a real implementation, we'd parse the existing SBOM file
+		// Create context for scanning
 		ctx := context.Background()
-		sbomModel, _, err := generator.GetSBOMModel(ctx, ".")
-		if err != nil {
-			return fmt.Errorf("failed to load SBOM: %w", err)
-		}
 
 		// Perform vulnerability scan
 		result, err := scanner.Scan(ctx, sbomModel)
