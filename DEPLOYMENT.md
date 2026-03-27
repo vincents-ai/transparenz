@@ -21,9 +21,10 @@ transparenz --version
 ```
 
 **Advantages:**
-- Zero dependencies (static binary)
+- Zero dependencies (static binary with embedded Syft/Grype libraries)
 - No Python runtime required
 - No package manager needed
+- No external Syft/Grype binaries required
 - Works on minimal systems
 
 **Supported Platforms:**
@@ -166,7 +167,6 @@ transparenz list  # First run will create schema
 | Variable | Description | Default |
 |----------|-------------|---------|
 | `DATABASE_URL` | PostgreSQL connection string | `postgresql://shift@localhost:5432/transparenz` |
-| `SYFT_CHECK_FOR_APP_UPDATE` | Disable Syft update checks | `false` |
 | `LOG_LEVEL` | Logging level (debug, info, warn, error) | `info` |
 
 ## Production Configuration
@@ -423,12 +423,12 @@ find /projects -type d -maxdepth 1 | \
 **Minimum:**
 - CPU: 1 core
 - Memory: 256MB RAM
-- Disk: 100MB
+- Disk: 50MB (binary: 19MB + working space)
 
 **Recommended (production):**
 - CPU: 2 cores
 - Memory: 512MB RAM
-- Disk: 1GB (for database)
+- Disk: 1GB (19MB binary + database)
 
 ## Security Considerations
 
@@ -544,20 +544,13 @@ echo $DATABASE_URL
 psql "$DATABASE_URL" -c "SELECT 1"
 ```
 
-**2. "syft: command not found" (Week 1-2 bridge)**
-
-```bash
-# Install Syft
-curl -sSfL https://raw.githubusercontent.com/anchore/syft/main/install.sh | sh -s -- -b /usr/local/bin
-```
-
-**3. "permission denied" on binary**
+**2. "permission denied" on binary**
 
 ```bash
 chmod +x transparenz
 ```
 
-**4. Low BSI compliance scores**
+**3. Low BSI compliance scores**
 
 ```bash
 # Use --bsi-compliant flag
