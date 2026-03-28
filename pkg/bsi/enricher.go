@@ -81,15 +81,22 @@ func (e *Enricher) EnrichSBOM(sbomJSON string) (string, error) {
 	return string(enriched), nil
 }
 
-// EnrichSBOMModel enriches an SBOM model with hashes, licenses, and suppliers
+// EnrichSBOMModel enriches an SBOM model with licenses and suppliers
 // This method works directly with Syft's native SBOM structures for better performance
+//
+// CRITICAL BSI TR-03183-2 COMPLIANCE NOTE:
+// Hash enrichment from go.sum has been REMOVED to prevent false provenance.
+// h1: hashes represent MODULE ZIP ARCHIVES, NOT compiled binary artifacts.
+// Per BSI TR-03183-2 Section 4.3, artifact hashes must represent the actual
+// deliverable binaries. Providing incorrect hash types violates cryptographic integrity.
+// Production systems must implement CI/CD binary artifact hashing for true compliance.
 func (e *Enricher) EnrichSBOMModel(sbomModel *sbom.SBOM) (*sbom.SBOM, error) {
 	if sbomModel == nil {
 		return nil, fmt.Errorf("sbomModel cannot be nil")
 	}
 
-	// Load go.sum for hash enrichment
-	goSumHashes := e.loadGoSum()
+	// REMOVED: goSumHashes := e.loadGoSum()
+	// False provenance violation - h1 hashes are module archives, not binaries
 
 	// Get all packages as a sorted list to iterate and get their IDs
 	packages := sbomModel.Artifacts.Packages.Sorted()
@@ -101,26 +108,11 @@ func (e *Enricher) EnrichSBOMModel(sbomModel *sbom.SBOM) (*sbom.SBOM, error) {
 		// Make a copy that we'll modify and add back
 		modifiedPkg := p
 
-		// Hash enrichment for Go modules
-		if modifiedPkg.Type == pkg.GoModulePkg {
-			key := modifiedPkg.Name + "@" + modifiedPkg.Version
-			if hash, ok := goSumHashes[key]; ok {
-				// Check if metadata is GolangModuleEntry
-				switch meta := modifiedPkg.Metadata.(type) {
-				case pkg.GolangModuleEntry:
-					// Update H1Digest if not already set
-					if meta.H1Digest == "" {
-						meta.H1Digest = hash
-						modifiedPkg.Metadata = meta
-					}
-				default:
-					// Create new GolangModuleEntry with hash
-					modifiedPkg.Metadata = pkg.GolangModuleEntry{
-						H1Digest: hash,
-					}
-				}
-			}
-		}
+		// REMOVED: Hash enrichment for Go modules
+		// Reason: h1 hashes from go.sum are module source archives, NOT binary artifacts.
+		// BSI TR-03183-2 requires artifact-level hashes (compiled binaries).
+		// Providing wrong hash type = false provenance = compliance violation.
+		// See loadGoSum() documentation for full explanation.
 
 		// License enrichment - add license if not present or empty
 		if modifiedPkg.Licenses.Empty() {
@@ -153,8 +145,8 @@ func (e *Enricher) enrichSPDX(sbomData map[string]interface{}) error {
 		return fmt.Errorf("invalid SPDX format: missing packages")
 	}
 
-	// Load go.sum for hash enrichment
-	goSumHashes := e.loadGoSum()
+	// REMOVED: goSumHashes := e.loadGoSum()
+	// False provenance violation - h1 hashes are module archives, not binaries
 
 	for i, pkgData := range packages {
 		pkg, ok := pkgData.(map[string]interface{})
@@ -163,25 +155,13 @@ func (e *Enricher) enrichSPDX(sbomData map[string]interface{}) error {
 		}
 
 		name := getString(pkg, "name")
-		version := getString(pkg, "versionInfo")
+		// version := getString(pkg, "versionInfo") // unused after hash removal
 
-		// Hash enrichment
-		if checksums, ok := pkg["checksums"].([]interface{}); !ok || len(checksums) == 0 {
-			// Try to find hash from go.sum
-			if hash, ok := goSumHashes[name+"@"+version]; ok {
-				// Convert base64 h1 hash to hex SHA-256
-				hexHash, err := h1DigestToHex(hash)
-				if err == nil {
-					pkg["checksums"] = []interface{}{
-						map[string]interface{}{
-							"algorithm":     "SHA256",
-							"checksumValue": hexHash,
-							"comment":       "Hash of Go module archive (go.sum h1:), NOT compiled binary. See BSI TR-03183-2 Section 4.3 for artifact hash requirements.",
-						},
-					}
-				}
-			}
-		}
+		// REMOVED: Hash enrichment
+		// Reason: h1 hashes from go.sum represent module source archives, NOT compiled binaries.
+		// BSI TR-03183-2 Section 4.3 requires artifact-level hashes (the actual deliverables).
+		// Providing incorrect hash types violates cryptographic integrity requirements.
+		// Omitting hashes is compliant; false provenance is not.
 
 		// License enrichment
 		if licenseConcluded := getString(pkg, "licenseConcluded"); licenseConcluded == "" || licenseConcluded == "NOASSERTION" {
@@ -211,7 +191,8 @@ func (e *Enricher) enrichCycloneDX(sbomData map[string]interface{}) error {
 		return fmt.Errorf("invalid CycloneDX format: missing components")
 	}
 
-	goSumHashes := e.loadGoSum()
+	// REMOVED: goSumHashes := e.loadGoSum()
+	// False provenance violation - h1 hashes are module archives, not binaries
 
 	for i, compData := range components {
 		comp, ok := compData.(map[string]interface{})
@@ -220,20 +201,13 @@ func (e *Enricher) enrichCycloneDX(sbomData map[string]interface{}) error {
 		}
 
 		name := getString(comp, "name")
-		version := getString(comp, "version")
+		// version := getString(comp, "version") // unused after hash removal
 
-		// Hash enrichment
-		if hashes, ok := comp["hashes"].([]interface{}); !ok || len(hashes) == 0 {
-			if hash, ok := goSumHashes[name+"@"+version]; ok {
-				comp["hashes"] = []interface{}{
-					map[string]interface{}{
-						"alg":     "SHA-256",
-						"content": hash,
-						"comment": "Hash of Go module archive (go.sum h1:), NOT compiled binary. See BSI TR-03183-2 Section 4.3.",
-					},
-				}
-			}
-		}
+		// REMOVED: Hash enrichment
+		// Reason: h1 hashes from go.sum represent module source archives, NOT compiled binaries.
+		// BSI TR-03183-2 Section 4.3 requires artifact-level hashes (the actual deliverables).
+		// Providing incorrect hash types violates cryptographic integrity requirements.
+		// Omitting hashes is compliant; false provenance is not.
 
 		// License enrichment
 		if licenses, ok := comp["licenses"].([]interface{}); !ok || len(licenses) == 0 {
