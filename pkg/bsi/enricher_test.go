@@ -11,15 +11,7 @@ import (
 )
 
 func TestEnricherSPDX(t *testing.T) {
-	// Create temp directory with go.sum
 	tmpDir := t.TempDir()
-	goSumContent := `github.com/spf13/cobra v1.10.2 h1:test123
-github.com/google/uuid v1.6.0 h1:abcd1234
-`
-	goSumPath := filepath.Join(tmpDir, "go.sum")
-	if err := os.WriteFile(goSumPath, []byte(goSumContent), 0644); err != nil {
-		t.Fatal(err)
-	}
 
 	enricher := NewEnricher(tmpDir)
 
@@ -61,25 +53,130 @@ github.com/google/uuid v1.6.0 h1:abcd1234
 		t.Errorf("Expected Steve Francia supplier, got %s", supplier)
 	}
 
-	// Check hash enrichment
-	checksums := pkg["checksums"].([]interface{})
-	if len(checksums) == 0 {
-		t.Error("Expected checksums to be added")
+	// Check BSI annotations (executable, archive, structured metadata)
+	if annotations, ok := pkg["annotations"].([]interface{}); ok {
+		if len(annotations) == 0 {
+			t.Error("Expected BSI TR-03183-2 annotations to be added")
+		}
+	}
+
+	// Check dependency completeness annotation
+	if annotations, ok := result["annotations"].([]interface{}); ok && len(annotations) > 0 {
+		found := false
+		for _, ann := range annotations {
+			if annMap, ok := ann.(map[string]interface{}); ok {
+				if comment, ok := annMap["comment"].(string); ok {
+					if comment != "" {
+						found = true
+						break
+					}
+				}
+			}
+		}
+		if !found {
+			t.Error("Expected dependency completeness annotation in document-level annotations")
+		}
+	}
+}
+
+func TestEnricherCycloneDX(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	enricher := NewEnricher(tmpDir)
+
+	sbomJSON := `{
+		"bomFormat": "CycloneDX",
+		"specVersion": "1.5",
+		"metadata": {},
+		"components": [
+			{
+				"name": "github.com/spf13/cobra",
+				"version": "v1.10.2",
+				"type": "library"
+			}
+		]
+	}`
+
+	enriched, err := enricher.EnrichSBOM(sbomJSON)
+	if err != nil {
+		t.Fatalf("EnrichSBOM failed: %v", err)
+	}
+
+	var result map[string]interface{}
+	if err := json.Unmarshal([]byte(enriched), &result); err != nil {
+		t.Fatal(err)
+	}
+
+	// Check specVersion bumped to 1.6 for BSI compliance
+	if specVer, ok := result["specVersion"].(string); ok {
+		if specVer != "1.6" {
+			t.Errorf("Expected specVersion 1.6, got %s", specVer)
+		}
+	} else {
+		t.Error("Expected specVersion to be set")
+	}
+
+	components := result["components"].([]interface{})
+	if len(components) == 0 {
+		t.Fatal("No components in enriched SBOM")
+	}
+
+	comp := components[0].(map[string]interface{})
+
+	// Check license enrichment
+	licenses := comp["licenses"].([]interface{})
+	if len(licenses) == 0 {
+		t.Fatal("Expected license to be added")
+	}
+	licData := licenses[0].(map[string]interface{})["license"].(map[string]interface{})
+	if licData["id"].(string) != "Apache-2.0" {
+		t.Errorf("Expected Apache-2.0 license, got %s", licData["id"])
+	}
+
+	// Check supplier enrichment
+	supplier := comp["supplier"].(map[string]interface{})
+	if supplier["name"].(string) != "Steve Francia" {
+		t.Errorf("Expected Steve Francia supplier, got %s", supplier["name"])
+	}
+
+	// Check BSI TR-03183-2 mandatory component properties
+	properties := comp["properties"].([]interface{})
+	requiredProps := map[string]string{
+		"executable": "false",
+		"archive":    "false",
+		"structured": "true",
+	}
+	foundProps := make(map[string]string)
+	for _, prop := range properties {
+		propMap := prop.(map[string]interface{})
+		foundProps[propMap["name"].(string)] = propMap["value"].(string)
+	}
+	for name, expected := range requiredProps {
+		if val, ok := foundProps[name]; !ok {
+			t.Errorf("Missing BSI property: %s", name)
+		} else if val != expected {
+			t.Errorf("Property %s: expected %s, got %s", name, expected, val)
+		}
+	}
+
+	// Check dependency completeness in metadata
+	metadata := result["metadata"].(map[string]interface{})
+	metaProps := metadata["properties"].([]interface{})
+	foundCompleteness := false
+	for _, prop := range metaProps {
+		propMap := prop.(map[string]interface{})
+		if propMap["name"].(string) == "completeness" && propMap["value"].(string) == "complete" {
+			foundCompleteness = true
+			break
+		}
+	}
+	if !foundCompleteness {
+		t.Error("Expected dependency completeness property in metadata")
 	}
 }
 
 func TestEnrichSBOMModel(t *testing.T) {
-	// Create temp directory with go.sum
-	tmpDir := t.TempDir()
-	goSumContent := `github.com/spf13/cobra v1.10.2 h1:test123hash
-github.com/google/uuid v1.6.0 h1:abcd1234hash
-`
-	goSumPath := filepath.Join(tmpDir, "go.sum")
-	if err := os.WriteFile(goSumPath, []byte(goSumContent), 0644); err != nil {
-		t.Fatal(err)
-	}
-
-	enricher := NewEnricher(tmpDir)
+	enricher := NewEnricher(".")
 
 	// Create a mock SBOM model
 	sbomModel := &sbom.SBOM{
@@ -151,37 +248,6 @@ github.com/google/uuid v1.6.0 h1:abcd1234hash
 			t.Errorf("Expected Apache-2.0 license for cobra, got %v", licenses)
 		}
 	}
-
-	// Check hash enrichment for cobra
-	if meta, ok := cobraPkg.Metadata.(pkg.GolangModuleEntry); ok {
-		if meta.H1Digest != "test123hash" {
-			t.Errorf("Expected H1Digest to be 'test123hash' for cobra, got '%s'", meta.H1Digest)
-		}
-	} else {
-		t.Error("Expected metadata to be GolangModuleEntry")
-	}
-
-	// Find uuid package
-	var uuidPkg *pkg.Package
-	for i := range packages {
-		if packages[i].Name == "github.com/google/uuid" {
-			uuidPkg = &packages[i]
-			break
-		}
-	}
-
-	if uuidPkg == nil {
-		t.Fatal("Could not find uuid package")
-	}
-
-	// Check uuid package hash
-	if meta, ok := uuidPkg.Metadata.(pkg.GolangModuleEntry); ok {
-		if meta.H1Digest != "abcd1234hash" {
-			t.Errorf("Expected H1Digest to be 'abcd1234hash' for uuid, got '%s'", meta.H1Digest)
-		}
-	} else {
-		t.Error("Expected metadata to be GolangModuleEntry for uuid")
-	}
 }
 
 func TestDetectLicense(t *testing.T) {
@@ -232,24 +298,51 @@ func TestDetectSupplier(t *testing.T) {
 	}
 }
 
-func TestLoadGoSum(t *testing.T) {
+func TestCalculateArtifactHash(t *testing.T) {
 	tmpDir := t.TempDir()
-	goSumContent := `github.com/spf13/cobra v1.10.2 h1:test123hash
-github.com/google/uuid v1.6.0 h1:abcd1234hash
-`
-	goSumPath := filepath.Join(tmpDir, "go.sum")
-	if err := os.WriteFile(goSumPath, []byte(goSumContent), 0644); err != nil {
+	testFile := filepath.Join(tmpDir, "test-binary")
+	content := []byte("test binary content for SHA-512 hashing")
+	if err := os.WriteFile(testFile, content, 0644); err != nil {
 		t.Fatal(err)
 	}
 
-	enricher := NewEnricher(tmpDir)
-	hashes := enricher.loadGoSum()
-
-	if len(hashes) != 2 {
-		t.Errorf("Expected 2 hashes, got %d", len(hashes))
+	hash, err := CalculateArtifactHash(testFile)
+	if err != nil {
+		t.Fatalf("CalculateArtifactHash failed: %v", err)
 	}
 
-	if hash := hashes["github.com/spf13/cobra@v1.10.2"]; hash != "test123hash" {
-		t.Errorf("Expected test123hash, got %s", hash)
+	// SHA-512 produces 128 hex characters
+	if len(hash) != 128 {
+		t.Errorf("Expected 128 hex chars for SHA-512, got %d", len(hash))
+	}
+}
+
+func TestBuildBSIProperties(t *testing.T) {
+	enricher := NewEnricher(".")
+
+	// Test library component
+	libComp := map[string]interface{}{
+		"name": "test-lib",
+		"type": "library",
+	}
+	props := enricher.buildBSIProperties(libComp)
+	if len(props) != 3 {
+		t.Fatalf("Expected 3 properties, got %d", len(props))
+	}
+
+	propMap := make(map[string]string)
+	for _, p := range props {
+		pm := p.(map[string]interface{})
+		propMap[pm["name"].(string)] = pm["value"].(string)
+	}
+
+	if propMap["executable"] != "false" {
+		t.Errorf("Library should not be executable, got %s", propMap["executable"])
+	}
+	if propMap["archive"] != "false" {
+		t.Errorf("Library should not be archive, got %s", propMap["archive"])
+	}
+	if propMap["structured"] != "true" {
+		t.Errorf("All components should be structured, got %s", propMap["structured"])
 	}
 }

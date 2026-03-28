@@ -34,6 +34,33 @@
           };
         };
 
+        packages.sbom = pkgs.stdenv.mkDerivation {
+          name = "transparenz-sbom";
+          src = ./.;
+
+          # Single binary - no jq, no external tools needed
+          nativeBuildInputs = [ self.packages.${system}.default ];
+
+          buildPhase = ''
+            # Generate BSI TR-03183-2 compliant SBOM
+            # The transparenz binary handles everything:
+            #   - CycloneDX 1.6 output
+            #   - Component properties: executable, archive, structured
+            #   - Dependency completeness assertion
+            #   - License enrichment
+            #   - Supplier enrichment
+            transparenz generate . \
+              --format cyclonedx \
+              --bsi-compliant \
+              --output transparenz-sbom.json
+          '';
+
+          installPhase = ''
+            mkdir -p $out
+            cp transparenz-sbom.json $out/
+          '';
+        };
+
         devShells.default = pkgs.mkShell {
           buildInputs = with pkgs; [
             go_1_23
@@ -53,12 +80,15 @@
             echo "Syft: $(syft version 2>/dev/null || echo 'installing...')"
             echo "Grype: $(grype version 2>/dev/null || echo 'installing...')"
             echo ""
-            echo "Week 1-2: CLI Foundation with Cobra"
-            echo "  - Root command: transparenz --help"
-            echo "  - Generate: transparenz generate <source>"
-            echo "  - Scan: transparenz scan <sbom>"
-            echo "  - BSI Check: transparenz bsi-check <sbom>"
-            echo "  - Database: list, show, search, delete (stubs)"
+            echo "BSI TR-03183-2 Compliant SBOM Generation:"
+            echo "  nix build .#sbom          - Generate BSI-compliant CycloneDX 1.6 SBOM"
+            echo "  transparenz generate . --bsi-compliant --format cyclonedx"
+            echo ""
+            echo "CLI Commands:"
+            echo "  transparenz generate <source>"
+            echo "  transparenz enrich <sbom>"
+            echo "  transparenz scan <sbom>"
+            echo "  transparenz bsi-check <sbom>"
           '';
         };
       }
