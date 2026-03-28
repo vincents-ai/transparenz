@@ -29,14 +29,14 @@
           
           meta = with pkgs.lib; {
             description = "BSI TR-03183 compliant SBOM generator (Native Go)";
-            license = licenses.asl20;
+            license = licenses.agpl3Plus;
             maintainers = [ ];
           };
         };
 
         devShells.default = pkgs.mkShell {
           buildInputs = with pkgs; [
-            go_1_22
+            go_1_23
             gopls
             gotools
             golangci-lint

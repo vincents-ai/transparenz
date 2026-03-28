@@ -1,6 +1,8 @@
 package cmd
 
 import (
+	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -105,15 +107,30 @@ type BSIFinding struct {
 func validateBSICompliance(sbomData map[string]interface{}) map[string]interface{} {
 	findings := []BSIFinding{}
 
-	// Extract packages from SPDX SBOM
-	packages, ok := sbomData["packages"].([]interface{})
-	if !ok {
+	// Detect SBOM format and extract components/packages
+	var components []interface{}
+	var format string
+
+	if packages, ok := sbomData["packages"].([]interface{}); ok {
+		// SPDX format
+		format = "SPDX"
+		components = packages
+	} else if comps, ok := sbomData["components"].([]interface{}); ok {
+		// CycloneDX format
+		format = "CycloneDX"
+		components = comps
+	} else {
 		return map[string]interface{}{
-			"error": "Invalid SBOM format - no packages found",
+			"error":             "Invalid SBOM format - no packages or components found",
+			"compliant":         false,
+			"overall_score":     0.0,
+			"hash_coverage":     0.0,
+			"license_coverage":  0.0,
+			"supplier_coverage": 0.0,
 		}
 	}
 
-	totalPackages := len(packages)
+	totalPackages := len(components)
 	hashCount := 0
 	licenseCount := 0
 	supplierCount := 0
@@ -122,34 +139,80 @@ func validateBSICompliance(sbomData map[string]interface{}) map[string]interface
 	sha256Regex := regexp.MustCompile(`^[a-fA-F0-9]{64}$`)
 	sha512Regex := regexp.MustCompile(`^[a-fA-F0-9]{128}$`)
 
-	for _, pkg := range packages {
+	for _, pkg := range components {
 		pkgMap, ok := pkg.(map[string]interface{})
 		if !ok {
 			continue
 		}
 
-		pkgName := pkgMap["name"].(string)
+		// Extract name and version (different field names in SPDX vs CycloneDX)
+		pkgName := ""
 		pkgVersion := ""
-		if v, ok := pkgMap["versionInfo"]; ok {
-			pkgVersion = v.(string)
+
+		if format == "SPDX" {
+			if name, ok := pkgMap["name"].(string); ok {
+				pkgName = name
+			}
+			if v, ok := pkgMap["versionInfo"].(string); ok {
+				pkgVersion = v
+			}
+		} else {
+			// CycloneDX
+			if name, ok := pkgMap["name"].(string); ok {
+				pkgName = name
+			}
+			if v, ok := pkgMap["version"].(string); ok {
+				pkgVersion = v
+			}
 		}
+
 		pkgID := fmt.Sprintf("%s@%s", pkgName, pkgVersion)
 
-		// Check hashes (checksums field in SPDX)
+		// Check hashes (checksums field in SPDX, hashes in CycloneDX)
 		hasValidHash := false
-		if checksums, ok := pkgMap["checksums"].([]interface{}); ok && len(checksums) > 0 {
-			for _, cs := range checksums {
-				if csMap, ok := cs.(map[string]interface{}); ok {
-					algorithm := csMap["algorithm"].(string)
-					value := csMap["checksumValue"].(string)
 
-					if algorithm == "SHA256" && sha256Regex.MatchString(value) {
-						hasValidHash = true
-						break
+		if format == "SPDX" {
+			if checksums, ok := pkgMap["checksums"].([]interface{}); ok && len(checksums) > 0 {
+				for _, cs := range checksums {
+					if csMap, ok := cs.(map[string]interface{}); ok {
+						if algorithm, ok := csMap["algorithm"].(string); ok {
+							if value, ok := csMap["checksumValue"].(string); ok {
+								if algorithm == "SHA256" && sha256Regex.MatchString(value) {
+									hasValidHash = true
+									break
+								}
+								if algorithm == "SHA512" && sha512Regex.MatchString(value) {
+									hasValidHash = true
+									break
+								}
+							}
+						}
 					}
-					if algorithm == "SHA512" && sha512Regex.MatchString(value) {
-						hasValidHash = true
-						break
+				}
+			}
+		} else {
+			// CycloneDX format: "hashes": [{"alg": "SHA-256", "content": "..."}]
+			// Note: CycloneDX hashes are base64-encoded
+			if hashes, ok := pkgMap["hashes"].([]interface{}); ok && len(hashes) > 0 {
+				for _, h := range hashes {
+					if hMap, ok := h.(map[string]interface{}); ok {
+						if alg, ok := hMap["alg"].(string); ok {
+							if content, ok := hMap["content"].(string); ok {
+								// Decode base64 hash to hex
+								decoded, err := base64.StdEncoding.DecodeString(content)
+								if err == nil {
+									hexHash := hex.EncodeToString(decoded)
+									if alg == "SHA-256" && sha256Regex.MatchString(hexHash) {
+										hasValidHash = true
+										break
+									}
+									if alg == "SHA-512" && sha512Regex.MatchString(hexHash) {
+										hasValidHash = true
+										break
+									}
+								}
+							}
+						}
 					}
 				}
 			}
@@ -167,12 +230,29 @@ func validateBSICompliance(sbomData map[string]interface{}) map[string]interface
 			})
 		}
 
-		// Check license (licenseConcluded or licenseDeclared)
+		// Check license
 		hasValidLicense := false
-		if license, ok := pkgMap["licenseConcluded"].(string); ok && license != "" && license != "NOASSERTION" {
-			hasValidLicense = true
-		} else if license, ok := pkgMap["licenseDeclared"].(string); ok && license != "" && license != "NOASSERTION" {
-			hasValidLicense = true
+
+		if format == "SPDX" {
+			if license, ok := pkgMap["licenseConcluded"].(string); ok && license != "" && license != "NOASSERTION" {
+				hasValidLicense = true
+			} else if license, ok := pkgMap["licenseDeclared"].(string); ok && license != "" && license != "NOASSERTION" {
+				hasValidLicense = true
+			}
+		} else {
+			// CycloneDX: "licenses": [{"license": {"id": "MIT"}}]
+			if licenses, ok := pkgMap["licenses"].([]interface{}); ok && len(licenses) > 0 {
+				for _, lic := range licenses {
+					if licMap, ok := lic.(map[string]interface{}); ok {
+						if licData, ok := licMap["license"].(map[string]interface{}); ok {
+							if id, ok := licData["id"].(string); ok && id != "" {
+								hasValidLicense = true
+								break
+							}
+						}
+					}
+				}
+			}
 		}
 
 		if hasValidLicense {
@@ -189,10 +269,20 @@ func validateBSICompliance(sbomData map[string]interface{}) map[string]interface
 
 		// Check supplier/originator
 		hasSupplier := false
-		if supplier, ok := pkgMap["supplier"].(string); ok && supplier != "" && supplier != "NOASSERTION" {
-			hasSupplier = true
-		} else if originator, ok := pkgMap["originator"].(string); ok && originator != "" && originator != "NOASSERTION" {
-			hasSupplier = true
+
+		if format == "SPDX" {
+			if supplier, ok := pkgMap["supplier"].(string); ok && supplier != "" && supplier != "NOASSERTION" {
+				hasSupplier = true
+			} else if originator, ok := pkgMap["originator"].(string); ok && originator != "" && originator != "NOASSERTION" {
+				hasSupplier = true
+			}
+		} else {
+			// CycloneDX: "supplier": {"name": "Acme Corp"}
+			if supplier, ok := pkgMap["supplier"].(map[string]interface{}); ok {
+				if name, ok := supplier["name"].(string); ok && name != "" {
+					hasSupplier = true
+				}
+			}
 		}
 
 		if hasSupplier {
@@ -240,6 +330,7 @@ func validateBSICompliance(sbomData map[string]interface{}) map[string]interface
 		"metadata": map[string]interface{}{
 			"standard": "BSI TR-03183-2",
 			"version":  "1.0",
+			"format":   format,
 			"threshold": map[string]interface{}{
 				"hash":     80.0,
 				"license":  80.0,

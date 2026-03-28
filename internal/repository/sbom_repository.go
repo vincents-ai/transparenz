@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later OR Commercial
+// Copyright (c) 2026 Vincent Palmer
+
 package repository
 
 import (
@@ -24,52 +27,52 @@ func NewSBOMRepository(db *gorm.DB) *SBOMRepository {
 }
 
 // SaveSBOM parses SBOM JSON and saves it to the database with all packages
+// Uses typed structs for robust parsing with compile-time safety
 func (r *SBOMRepository) SaveSBOM(ctx context.Context, sbomJSON string, sourcePath string) (uuid.UUID, error) {
-	// Parse SBOM JSON
-	var sbomData map[string]interface{}
-	if err := json.Unmarshal([]byte(sbomJSON), &sbomData); err != nil {
-		return uuid.Nil, fmt.Errorf("failed to parse SBOM JSON: %w", err)
-	}
+	// Determine SBOM format by attempting to parse with typed structs
+	var format string
+	var formatVersion string
+	var documentNamespace string
+	var name string
+	var version string
+	var packages []models.Package
+	var rawData interface{}
 
-	// Determine SBOM format (SPDX or CycloneDX)
-	format := "SPDX"
-	formatVersion := "2.3"
-	documentNamespace := ""
-	name := "Unknown"
-	version := "1.0"
-
-	// Check for SPDX fields
-	if spdxVersion, ok := sbomData["spdxVersion"].(string); ok {
+	// Try SPDX format first
+	var spdxDoc SPDXDocument
+	if err := json.Unmarshal([]byte(sbomJSON), &spdxDoc); err == nil && spdxDoc.SPDXVersion != "" {
 		format = "SPDX"
-		formatVersion = strings.TrimPrefix(spdxVersion, "SPDX-")
-		if ns, ok := sbomData["documentNamespace"].(string); ok {
-			documentNamespace = ns
+		formatVersion = strings.TrimPrefix(spdxDoc.SPDXVersion, "SPDX-")
+		documentNamespace = spdxDoc.DocumentNamespace
+		name = spdxDoc.Name
+
+		// Extract version from documentDescribes if available
+		if len(spdxDoc.DocumentDescribes) > 0 {
+			version = spdxDoc.DocumentDescribes[0]
+		} else {
+			version = "1.0"
 		}
-		if n, ok := sbomData["name"].(string); ok {
-			name = n
-		}
-		if v, ok := sbomData["documentDescribes"].([]interface{}); ok && len(v) > 0 {
-			if pkgRef, ok := v[0].(string); ok {
-				version = pkgRef
+
+		rawData = spdxDoc
+	} else {
+		// Try CycloneDX format
+		var cdxDoc CycloneDXDocument
+		if err := json.Unmarshal([]byte(sbomJSON), &cdxDoc); err == nil && cdxDoc.BomFormat == "CycloneDX" {
+			format = "CycloneDX"
+			formatVersion = cdxDoc.SpecVersion
+			documentNamespace = cdxDoc.SerialNumber
+
+			if cdxDoc.Metadata != nil && cdxDoc.Metadata.Component != nil {
+				name = cdxDoc.Metadata.Component.Name
+				version = cdxDoc.Metadata.Component.Version
+			} else {
+				name = "Unknown"
+				version = "1.0"
 			}
-		}
-	} else if bomFormat, ok := sbomData["bomFormat"].(string); ok && bomFormat == "CycloneDX" {
-		format = "CycloneDX"
-		if specVersion, ok := sbomData["specVersion"].(string); ok {
-			formatVersion = specVersion
-		}
-		if serialNumber, ok := sbomData["serialNumber"].(string); ok {
-			documentNamespace = serialNumber
-		}
-		if metadata, ok := sbomData["metadata"].(map[string]interface{}); ok {
-			if component, ok := metadata["component"].(map[string]interface{}); ok {
-				if n, ok := component["name"].(string); ok {
-					name = n
-				}
-				if v, ok := component["version"].(string); ok {
-					version = v
-				}
-			}
+
+			rawData = cdxDoc
+		} else {
+			return uuid.Nil, fmt.Errorf("failed to parse SBOM: unsupported or malformed format (not valid SPDX or CycloneDX)")
 		}
 	}
 
@@ -78,7 +81,15 @@ func (r *SBOMRepository) SaveSBOM(ctx context.Context, sbomJSON string, sourcePa
 		documentNamespace = fmt.Sprintf("https://transparenz.local/sbom/%s", uuid.New().String())
 	}
 
-	// Create SBOM model
+	// Create SBOM model - store the raw typed data as JSONB
+	var sbomJSONB models.JSONB
+	if jsonBytes, err := json.Marshal(rawData); err == nil {
+		var dataMap map[string]interface{}
+		if err := json.Unmarshal(jsonBytes, &dataMap); err == nil {
+			sbomJSONB = models.JSONB(dataMap)
+		}
+	}
+
 	sbom := models.SBOM{
 		Name:              name,
 		Version:           version,
@@ -86,7 +97,7 @@ func (r *SBOMRepository) SaveSBOM(ctx context.Context, sbomJSON string, sourcePa
 		FormatVersion:     formatVersion,
 		DocumentNamespace: documentNamespace,
 		SourcePath:        &sourcePath,
-		SBOMJson:          models.JSONB(sbomData),
+		SBOMJson:          sbomJSONB,
 	}
 
 	// Begin transaction
@@ -96,10 +107,16 @@ func (r *SBOMRepository) SaveSBOM(ctx context.Context, sbomJSON string, sourcePa
 			return fmt.Errorf("failed to save SBOM: %w", err)
 		}
 
-		// Parse and save packages
-		packages, err := r.extractPackages(sbomData, sbom.ID, format)
-		if err != nil {
-			return fmt.Errorf("failed to extract packages: %w", err)
+		// Extract packages using typed structs
+		var extractErr error
+		if format == "SPDX" {
+			packages, extractErr = r.extractSPDXPackages(rawData.(SPDXDocument), sbom.ID)
+		} else {
+			packages, extractErr = r.extractCycloneDXPackages(rawData.(CycloneDXDocument), sbom.ID)
+		}
+
+		if extractErr != nil {
+			return fmt.Errorf("failed to extract packages: %w", extractErr)
 		}
 
 		if len(packages) > 0 {
@@ -118,112 +135,96 @@ func (r *SBOMRepository) SaveSBOM(ctx context.Context, sbomJSON string, sourcePa
 	return sbom.ID, nil
 }
 
-// extractPackages extracts package information from SBOM JSON
-func (r *SBOMRepository) extractPackages(sbomData map[string]interface{}, sbomID uuid.UUID, format string) ([]models.Package, error) {
-	var packages []models.Package
+// extractSPDXPackages extracts package information from typed SPDX document
+func (r *SBOMRepository) extractSPDXPackages(doc SPDXDocument, sbomID uuid.UUID) ([]models.Package, error) {
+	packages := make([]models.Package, 0, len(doc.Packages))
 
-	if format == "SPDX" {
-		if pkgsData, ok := sbomData["packages"].([]interface{}); ok {
-			for _, pkgData := range pkgsData {
-				if pkg, ok := pkgData.(map[string]interface{}); ok {
-					p := models.Package{
-						SBOMId: sbomID,
-						Name:   getStringValue(pkg, "name"),
-					}
+	for _, spdxPkg := range doc.Packages {
+		p := models.Package{
+			SBOMId: sbomID,
+			Name:   spdxPkg.Name,
+		}
 
-					if v := getStringValue(pkg, "versionInfo"); v != "" {
-						p.Version = &v
-					}
-					if purl := getStringValue(pkg, "externalRefs", "PACKAGE-MANAGER", "purl"); purl != "" {
-						p.PURL = &purl
-					}
-					if cpe := getStringValue(pkg, "externalRefs", "SECURITY", "cpe"); cpe != "" {
-						p.CPE = &cpe
-					}
-					if license := getStringValue(pkg, "licenseConcluded"); license != "" {
-						p.License = &license
-					}
-					if supplier := getStringValue(pkg, "supplier"); supplier != "" {
-						p.Supplier = &supplier
-					}
-					if dl := getStringValue(pkg, "downloadLocation"); dl != "" && dl != "NOASSERTION" {
-						p.DownloadLocation = &dl
-					}
-					if desc := getStringValue(pkg, "description"); desc != "" {
-						p.Description = &desc
-					}
+		if spdxPkg.VersionInfo != "" {
+			p.Version = &spdxPkg.VersionInfo
+		}
 
-					packages = append(packages, p)
-				}
+		// Extract PURL from externalRefs
+		for _, extRef := range spdxPkg.ExternalRefs {
+			if extRef.ReferenceType == "purl" {
+				p.PURL = &extRef.ReferenceLocator
+			} else if extRef.ReferenceCategory == "SECURITY" && extRef.ReferenceType == "cpe23Type" {
+				p.CPE = &extRef.ReferenceLocator
 			}
 		}
-	} else if format == "CycloneDX" {
-		if compsData, ok := sbomData["components"].([]interface{}); ok {
-			for _, compData := range compsData {
-				if comp, ok := compData.(map[string]interface{}); ok {
-					p := models.Package{
-						SBOMId: sbomID,
-						Name:   getStringValue(comp, "name"),
-					}
 
-					if v := getStringValue(comp, "version"); v != "" {
-						p.Version = &v
-					}
-					if purl := getStringValue(comp, "purl"); purl != "" {
-						p.PURL = &purl
-					}
-					if cpe := getStringValue(comp, "cpe"); cpe != "" {
-						p.CPE = &cpe
-					}
-					if licenses, ok := comp["licenses"].([]interface{}); ok && len(licenses) > 0 {
-						if lic, ok := licenses[0].(map[string]interface{}); ok {
-							if id := getStringValue(lic, "license", "id"); id != "" {
-								p.License = &id
-							}
-						}
-					}
-					if desc := getStringValue(comp, "description"); desc != "" {
-						p.Description = &desc
-					}
-
-					packages = append(packages, p)
-				}
-			}
+		if spdxPkg.LicenseConcluded != "" && spdxPkg.LicenseConcluded != "NOASSERTION" {
+			p.License = &spdxPkg.LicenseConcluded
 		}
+
+		if spdxPkg.Supplier != "" && spdxPkg.Supplier != "NOASSERTION" {
+			p.Supplier = &spdxPkg.Supplier
+		}
+
+		if spdxPkg.DownloadLocation != "" && spdxPkg.DownloadLocation != "NOASSERTION" {
+			p.DownloadLocation = &spdxPkg.DownloadLocation
+		}
+
+		if spdxPkg.Description != "" {
+			p.Description = &spdxPkg.Description
+		}
+
+		packages = append(packages, p)
 	}
 
 	return packages, nil
 }
 
-// getStringValue is a helper to safely extract string values from nested maps
-func getStringValue(data map[string]interface{}, keys ...string) string {
-	current := data
-	for i, key := range keys {
-		if i == len(keys)-1 {
-			if val, ok := current[key].(string); ok {
-				return val
-			}
-			return ""
+// extractCycloneDXPackages extracts package information from typed CycloneDX document
+func (r *SBOMRepository) extractCycloneDXPackages(doc CycloneDXDocument, sbomID uuid.UUID) ([]models.Package, error) {
+	packages := make([]models.Package, 0, len(doc.Components))
+
+	for _, comp := range doc.Components {
+		p := models.Package{
+			SBOMId: sbomID,
+			Name:   comp.Name,
 		}
-		if next, ok := current[key].(map[string]interface{}); ok {
-			current = next
-		} else if next, ok := current[key].([]interface{}); ok {
-			// Handle array case for externalRefs
-			for _, item := range next {
-				if itemMap, ok := item.(map[string]interface{}); ok {
-					if refType, ok := itemMap["referenceType"].(string); ok && refType == keys[i+1] {
-						if val, ok := itemMap["referenceLocator"].(string); ok {
-							return val
-						}
-					}
-				}
-			}
-			return ""
-		} else {
-			return ""
+
+		if comp.Version != "" {
+			p.Version = &comp.Version
 		}
+
+		if comp.Purl != "" {
+			p.PURL = &comp.Purl
+		}
+
+		if comp.CPE != "" {
+			p.CPE = &comp.CPE
+		}
+
+		// Extract first license
+		if len(comp.Licenses) > 0 {
+			licenseID := comp.Licenses[0].License.ID
+			if licenseID == "" {
+				licenseID = comp.Licenses[0].License.Name
+			}
+			if licenseID != "" {
+				p.License = &licenseID
+			}
+		}
+
+		if comp.Supplier != nil && comp.Supplier.Name != "" {
+			p.Supplier = &comp.Supplier.Name
+		}
+
+		if comp.Description != "" {
+			p.Description = &comp.Description
+		}
+
+		packages = append(packages, p)
 	}
-	return ""
+
+	return packages, nil
 }
 
 // GetSBOM retrieves an SBOM by ID with all related packages

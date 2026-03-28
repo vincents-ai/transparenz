@@ -1,4 +1,42 @@
-# Transparenz-Go
+# Transparenz
+
+Transparenz is a secure client/server architecture designed from the ground up to align with the stringent security and reporting requirements of the **EU Cyber Resilience Act (CRA)**. It generates BSI TR-03183-2 compliant SBOMs for the Deutschland-Stack.
+
+## ⚖️ Licensing Options
+
+This software is dual-licensed. You must choose one of the following licenses to use, modify, or distribute this software.
+
+### Option 1: Community Edition (GNU AGPL-3.0-or-later)
+This project is deeply committed to the open-source community and the "Public Money, Public Code" initiative. 
+
+The Community Edition is free of charge and licensed under the GNU Affero General Public License v3.0 or later. It is ideal for:
+* Open-source developers and researchers.
+* **Public Sector and Government Agencies** (e.g., municipalities, federal IT providers like ZenDiS) deploying infrastructure for public or internal use.
+* Non-profit organizations.
+
+**The AGPL Catch:** If you modify this software or offer it as a service over a network (e.g., hosting the server component as a backend for a SaaS platform), you **must** publicly release the complete source code of your modifications and the proprietary stack interacting with it under the AGPL. 
+
+*Users of the Community Edition are solely responsible for generating their own Software Bill of Materials (SBOMs), conducting vulnerability tracking, and adhering to CRA incident reporting timelines.*
+
+### Option 2: Enterprise Edition (Commercial License)
+If you are a commercial entity building proprietary, closed-source software, the AGPL's copyleft requirements will likely conflict with your business model. 
+
+The Enterprise Edition provides a commercial license that completely waives the AGPL network and copyleft restrictions. This is required if you intend to:
+* Embed the client into a closed-source commercial application.
+* Host the server component as a backend for a proprietary SaaS offering.
+* Resell or white-label the software.
+
+**Enterprise & EU CRA Features:**
+Purchasing a commercial license includes:
+* **Guaranteed SLAs:** Contractual response times for critical security patches (48hr for critical vulnerabilities).
+* **CRA Artifacts:** Automated, cryptographically signed CycloneDX SBOMs provided with every release to drastically reduce your compliance overhead.
+* **Indemnification & Direct Support:** Priority routing for bug fixes and architectural consulting.
+
+To purchase a commercial license, contact: `shift@someone.section.me`
+
+---
+
+## About
 
 BSI TR-03183 compliant SBOM generator for Deutschland-Stack - Native Go implementation.
 
@@ -247,9 +285,12 @@ Example:
   transparenz scan sbom.json --output-format table
 ```
 
+## 🤝 Contributing
+We welcome contributions! However, to maintain our ability to offer this software under a dual-license model, all contributors must sign a Contributor License Agreement (CLA) assigning joint copyright of their contributions to the project maintainers. See `CONTRIBUTING.md` for details.
+
 ## License
 
-Apache License 2.0
+Dual-licensed under GNU AGPL-3.0-or-later OR Commercial License. See `LICENSE.md` for details.
 
 ## Engram Task
 

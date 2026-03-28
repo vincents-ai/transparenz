@@ -34,7 +34,7 @@ var dbMigrateCmd = &cobra.Command{
 			fmt.Fprintln(os.Stderr, "Running database migrations...")
 		}
 
-		if err := database.AutoMigrate(db); err != nil {
+		if err := database.Migrate(db); err != nil {
 			return fmt.Errorf("failed to run migrations: %w", err)
 		}
 
