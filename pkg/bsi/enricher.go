@@ -586,6 +586,7 @@ func (e *Enricher) parseLicenseFile(packageName string) string {
 }
 
 // detectLicenseFromText detects license type from license text using google/licenseclassifier
+// Falls back to go-license-detector if the classifier doesn't find a match
 func detectLicenseFromText(text string) string {
 	if licenseClassifier == nil {
 		return ""

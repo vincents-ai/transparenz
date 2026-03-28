@@ -104,6 +104,22 @@ func InitializeScenario(s *godog.ScenarioContext) {
 	s.Step(`^the enriched SBOM has SHA-512 hashes$`, theEnrichedSBOMHasSHA512Hashes)
 	s.Step(`^an SBOM file exists with SHA-256 only hashes$`, anSBOMFileExistsWithSHA256OnlyHashes)
 	s.Step(`^the report flags SHA-256-only as non-compliant$`, theReportFlagsSHA256OnlyAsNonCompliant)
+
+	// BSI TR-03183 new steps
+	s.Step(`^the JSON metadata has field "([^"]*)" with non-empty string$`, theJSONMetadataHasFieldWithNonEmptyString)
+	s.Step(`^the timestamp follows ISO 8601 format$`, theTimestampFollowsISO8601)
+	s.Step(`^the JSON metadata tools array has object with "([^"]*)" field$`, theJSONMetadataToolsArrayHasObjectWithField)
+	s.Step(`^the JSON metadata tools array has object with "([^"]*)" field$`, theJSONMetadataToolsArrayHasObjectWithField)
+	s.Step(`^the JSON has field "([^"]*)" starting with "([^"]*)"$`, theJSONHasFieldStartingWith)
+	s.Step(`^the JSON metadata component has field "([^"]*)" with non-empty string$`, theJSONMetadataComponentHasFieldWithNonEmptyString)
+	s.Step(`^the JSON metadata component has field "([^"]*)" with value in: ([^"]*)$`, theJSONMetadataComponentHasFieldWithValueIn)
+	s.Step(`^the JSON components array has all items with field "([^"]*)"$`, theJSONComponentsArrayHasAllItemsWithField)
+	s.Step(`^at least (\d+)% of components have field "([^"]*)" starting with "([^"]*)"$`, atLeastPercentOfComponentsHaveFieldStartingWith)
+	s.Step(`^the JSON components licenses use SPDX identifiers$`, theJSONComponentsLicensesUseSPDXIdentifiers)
+	s.Step(`^the JSON has field "([^"]*)" with number$`, theJSONHasFieldWithNumber)
+	s.Step(`^the bsi-check report has "([^"]*)" at least (\d+)%$`, theBsiCheckReportHasFieldAtLeastPercent)
+	s.Step(`^the JSON dependencies have items with "([^"]*)" field starting with "([^"]*)"$`, theJSONDependenciesHaveItemsWithFieldStartingWith)
+	s.Step(`^the primary component has at least one dependency$`, thePrimaryComponentHasAtLeastOneDependency)
 }
 
 func theTransparenzBinaryIsBuilt(ctx context.Context) error {
@@ -543,6 +559,301 @@ func theReportFlagsSHA256OnlyAsNonCompliant(ctx context.Context) error {
 		return nil // Not fully compliant on hash coverage
 	}
 	return fmt.Errorf("SHA-256-only components not flagged as non-compliant")
+}
+
+// BSI TR-03183 step implementations
+
+func theJSONMetadataHasFieldWithNonEmptyString(ctx context.Context, field string) error {
+	m, ok := ctx.Value(keyJSON).(map[string]interface{})
+	if !ok {
+		return fmt.Errorf("JSON is not an object")
+	}
+	metadata, ok := m["metadata"].(map[string]interface{})
+	if !ok {
+		return fmt.Errorf("no metadata found")
+	}
+	val, exists := metadata[field]
+	if !exists || val == nil || fmt.Sprintf("%v", val) == "" {
+		return fmt.Errorf("metadata field %q is empty or missing", field)
+	}
+	return nil
+}
+
+func theTimestampFollowsISO8601(ctx context.Context) error {
+	m, ok := ctx.Value(keyJSON).(map[string]interface{})
+	if !ok {
+		return fmt.Errorf("JSON is not an object")
+	}
+	metadata, ok := m["metadata"].(map[string]interface{})
+	if !ok {
+		return fmt.Errorf("no metadata found")
+	}
+	ts, ok := metadata["timestamp"].(string)
+	if !ok || ts == "" {
+		return fmt.Errorf("timestamp is missing or not a string")
+	}
+	// Basic ISO 8601 check: should contain T and be reasonably long
+	if !strings.Contains(ts, "T") || len(ts) < 10 {
+		return fmt.Errorf("timestamp %q does not follow ISO 8601 format", ts)
+	}
+	return nil
+}
+
+func theJSONMetadataToolsArrayHasObjectWithField(ctx context.Context, field string) error {
+	m, ok := ctx.Value(keyJSON).(map[string]interface{})
+	if !ok {
+		return fmt.Errorf("JSON is not an object")
+	}
+	metadata, ok := m["metadata"].(map[string]interface{})
+	if !ok {
+		return fmt.Errorf("no metadata found")
+	}
+	tools, ok := metadata["tools"].([]interface{})
+	if !ok || len(tools) == 0 {
+		return fmt.Errorf("no tools array found")
+	}
+	for _, t := range tools {
+		tool, ok := t.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		if _, exists := tool[field]; exists {
+			return nil
+		}
+	}
+	return fmt.Errorf("no tool has field %q", field)
+}
+
+func theJSONHasFieldStartingWith(ctx context.Context, field, prefix string) error {
+	m, ok := ctx.Value(keyJSON).(map[string]interface{})
+	if !ok {
+		return fmt.Errorf("JSON is not an object")
+	}
+	val, exists := m[field]
+	if !exists {
+		return fmt.Errorf("field %q not found", field)
+	}
+	if !strings.HasPrefix(fmt.Sprintf("%v", val), prefix) {
+		return fmt.Errorf("field %q does not start with %q", field, prefix)
+	}
+	return nil
+}
+
+func theJSONMetadataComponentHasFieldWithNonEmptyString(ctx context.Context, field string) error {
+	m, ok := ctx.Value(keyJSON).(map[string]interface{})
+	if !ok {
+		return fmt.Errorf("JSON is not an object")
+	}
+	metadata, ok := m["metadata"].(map[string]interface{})
+	if !ok {
+		return fmt.Errorf("no metadata found")
+	}
+	component, ok := metadata["component"].(map[string]interface{})
+	if !ok {
+		return fmt.Errorf("no component in metadata")
+	}
+	val, exists := component[field]
+	if !exists || val == nil || fmt.Sprintf("%v", val) == "" {
+		return fmt.Errorf("metadata component field %q is empty or missing", field)
+	}
+	return nil
+}
+
+func theJSONMetadataComponentHasFieldWithValueIn(ctx context.Context, field, values string) error {
+	m, ok := ctx.Value(keyJSON).(map[string]interface{})
+	if !ok {
+		return fmt.Errorf("JSON is not an object")
+	}
+	metadata, ok := m["metadata"].(map[string]interface{})
+	if !ok {
+		return fmt.Errorf("no metadata found")
+	}
+	component, ok := metadata["component"].(map[string]interface{})
+	if !ok {
+		return fmt.Errorf("no component in metadata")
+	}
+	val, exists := component[field]
+	if !exists {
+		return fmt.Errorf("metadata component field %q is missing", field)
+	}
+	valStr := fmt.Sprintf("%v", val)
+	allowedValues := strings.Split(values, ", ")
+	for _, v := range allowedValues {
+		if valStr == v {
+			return nil
+		}
+	}
+	return fmt.Errorf("metadata component field %q value %q not in allowed values %q", field, valStr, values)
+}
+
+func theJSONComponentsArrayHasAllItemsWithField(ctx context.Context, field string) error {
+	m, ok := ctx.Value(keyJSON).(map[string]interface{})
+	if !ok {
+		return fmt.Errorf("JSON is not an object")
+	}
+	components, ok := m["components"].([]interface{})
+	if !ok || len(components) == 0 {
+		return fmt.Errorf("no components found")
+	}
+	missing := []string{}
+	for _, c := range components {
+		comp, ok := c.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		if _, exists := comp[field]; !exists {
+			missing = append(missing, fmt.Sprintf("%v", comp["name"]))
+		}
+	}
+	if len(missing) > 0 {
+		return fmt.Errorf("components missing field %q: %v", field, missing)
+	}
+	return nil
+}
+
+func atLeastPercentOfComponentsHaveFieldStartingWith(ctx context.Context, percent int, field, prefix string) error {
+	m, ok := ctx.Value(keyJSON).(map[string]interface{})
+	if !ok {
+		return fmt.Errorf("JSON is not an object")
+	}
+	components, ok := m["components"].([]interface{})
+	if !ok || len(components) == 0 {
+		return fmt.Errorf("no components found")
+	}
+	withField := 0
+	for _, c := range components {
+		comp, ok := c.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		val, exists := comp[field]
+		if exists && strings.HasPrefix(fmt.Sprintf("%v", val), prefix) {
+			withField++
+		}
+	}
+	actualPercent := float64(withField) * 100 / float64(len(components))
+	if float64(actualPercent) < float64(percent) {
+		return fmt.Errorf("only %.1f%% of components have field %q starting with %q (need >%d%%)", actualPercent, field, prefix, percent)
+	}
+	return nil
+}
+
+func theJSONComponentsLicensesUseSPDXIdentifiers(ctx context.Context) error {
+	m, ok := ctx.Value(keyJSON).(map[string]interface{})
+	if !ok {
+		return fmt.Errorf("JSON is not an object")
+	}
+	components, ok := m["components"].([]interface{})
+	if !ok || len(components) == 0 {
+		return fmt.Errorf("no components found")
+	}
+	spdxLicenses := map[string]bool{
+		"Apache-2.0": true, "MIT": true, "BSD-2-Clause": true, "BSD-3-Clause": true,
+		"GPL-2.0": true, "GPL-3.0": true, "LGPL-2.1": true, "MPL-2.0": true,
+		"ISC": true, "Python-2.0": true, "Artistic-2.0": true, "EPL-1.0": true,
+	}
+	for _, c := range components {
+		comp, ok := c.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		licenses, ok := comp["licenses"].([]interface{})
+		if !ok || len(licenses) == 0 {
+			continue
+		}
+		for _, lic := range licenses {
+			licMap, ok := lic.(map[string]interface{})
+			if !ok {
+				continue
+			}
+			if licData, ok := licMap["license"].(map[string]interface{}); ok {
+				if licID, ok := licData["id"].(string); ok {
+					if _, isSPDX := spdxLicenses[licID]; !isSPDX && licID != "NOASSERTION" && licID != "" {
+						return fmt.Errorf("non-SPDX license found: %s", licID)
+					}
+				}
+			}
+		}
+	}
+	return nil
+}
+
+func theJSONHasFieldWithNumber(ctx context.Context, field string) error {
+	m, ok := ctx.Value(keyJSON).(map[string]interface{})
+	if !ok {
+		return fmt.Errorf("JSON is not an object")
+	}
+	val, exists := m[field]
+	if !exists {
+		return fmt.Errorf("field %q not found", field)
+	}
+	if _, ok := val.(float64); !ok {
+		return fmt.Errorf("field %q is not a number, got %T", field, val)
+	}
+	return nil
+}
+
+func theBsiCheckReportHasFieldAtLeastPercent(ctx context.Context, field string, percent int) error {
+	m, ok := ctx.Value(keyReportJSON).(map[string]interface{})
+	if !ok {
+		return fmt.Errorf("report JSON not available")
+	}
+	val, exists := m[field]
+	if !exists {
+		return fmt.Errorf("report field %q not found", field)
+	}
+	valFloat, ok := val.(float64)
+	if !ok {
+		return fmt.Errorf("report field %q is not a number", field)
+	}
+	if valFloat < float64(percent) {
+		return fmt.Errorf("report field %q is %.1f%%, need at least %d%%", field, valFloat, percent)
+	}
+	return nil
+}
+
+func theJSONDependenciesHaveItemsWithFieldStartingWith(ctx context.Context, field, prefix string) error {
+	m, ok := ctx.Value(keyJSON).(map[string]interface{})
+	if !ok {
+		return fmt.Errorf("JSON is not an object")
+	}
+	deps, ok := m["dependencies"].([]interface{})
+	if !ok || len(deps) == 0 {
+		return fmt.Errorf("no dependencies found")
+	}
+	for _, d := range deps {
+		dep, ok := d.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		val, exists := dep[field]
+		if exists && strings.HasPrefix(fmt.Sprintf("%v", val), prefix) {
+			return nil
+		}
+	}
+	return fmt.Errorf("no dependency has field %q starting with %q", field, prefix)
+}
+
+func thePrimaryComponentHasAtLeastOneDependency(ctx context.Context) error {
+	m, ok := ctx.Value(keyJSON).(map[string]interface{})
+	if !ok {
+		return fmt.Errorf("JSON is not an object")
+	}
+	deps, ok := m["dependencies"].([]interface{})
+	if !ok || len(deps) == 0 {
+		return fmt.Errorf("no dependencies found")
+	}
+	// Check if any dependency has dependsOn with at least one item
+	for _, d := range deps {
+		dep, ok := d.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		if dependsOn, ok := dep["dependsOn"].([]interface{}); ok && len(dependsOn) > 0 {
+			return nil
+		}
+	}
+	return fmt.Errorf("no dependency has any dependencies")
 }
 
 func getTmpDir(ctx context.Context) string {
