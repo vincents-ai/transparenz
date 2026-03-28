@@ -274,46 +274,52 @@ func (r *SBOMRepository) DeleteSBOM(ctx context.Context, id uuid.UUID) error {
 	return nil
 }
 
-// SaveScanResults saves vulnerability scan results for an SBOM
+// SaveScanResults saves vulnerability scan results for an SBOM using typed structs
+// Uses GrypeScanResult for compile-time safety per BSI TR-03183 validation requirements
 func (r *SBOMRepository) SaveScanResults(ctx context.Context, sbomID uuid.UUID, scanJSON string) (uuid.UUID, error) {
-	var scanData map[string]interface{}
+	var scanData GrypeScanResult
 	if err := json.Unmarshal([]byte(scanJSON), &scanData); err != nil {
-		return uuid.Nil, fmt.Errorf("failed to parse scan JSON: %w", err)
+		return uuid.Nil, fmt.Errorf("failed to parse Grype scan JSON: %w", err)
 	}
 
-	// Extract scan metadata
+	// Extract scan metadata with typed access
 	scan := models.Scan{
 		SBOMId:      sbomID,
 		ToolName:    "grype", // Default tool name
 		ToolVersion: "unknown",
 	}
 
-	// Parse scan results
-	if matches, ok := scanData["matches"].([]interface{}); ok {
-		scan.TotalVulnerabilities = len(matches)
+	// Extract tool version from descriptor if available
+	if scanData.Descriptor != nil {
+		scan.ToolName = scanData.Descriptor.Name
+		scan.ToolVersion = scanData.Descriptor.Version
+	}
 
-		// Count by severity
-		for _, match := range matches {
-			if m, ok := match.(map[string]interface{}); ok {
-				if vuln, ok := m["vulnerability"].(map[string]interface{}); ok {
-					if severity, ok := vuln["severity"].(string); ok {
-						switch strings.ToUpper(severity) {
-						case "CRITICAL":
-							scan.CriticalCount++
-						case "HIGH":
-							scan.HighCount++
-						case "MEDIUM":
-							scan.MediumCount++
-						case "LOW":
-							scan.LowCount++
-						}
-					}
-				}
-			}
+	// Count total vulnerabilities and severity levels using typed structs
+	scan.TotalVulnerabilities = len(scanData.Matches)
+
+	for _, match := range scanData.Matches {
+		switch strings.ToUpper(match.Vulnerability.Severity) {
+		case "CRITICAL":
+			scan.CriticalCount++
+		case "HIGH":
+			scan.HighCount++
+		case "MEDIUM":
+			scan.MediumCount++
+		case "LOW":
+			scan.LowCount++
 		}
 	}
 
-	scan.ScanMetadata = models.JSONB(scanData)
+	// Store the typed scan data as JSONB
+	var scanJSONB models.JSONB
+	if jsonBytes, err := json.Marshal(scanData); err == nil {
+		var dataMap map[string]interface{}
+		if err := json.Unmarshal(jsonBytes, &dataMap); err == nil {
+			scanJSONB = models.JSONB(dataMap)
+		}
+	}
+	scan.ScanMetadata = scanJSONB
 
 	if err := r.db.WithContext(ctx).Create(&scan).Error; err != nil {
 		return uuid.Nil, fmt.Errorf("failed to save scan results: %w", err)

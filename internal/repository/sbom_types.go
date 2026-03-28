@@ -117,3 +117,101 @@ type CycloneDXOrganization struct {
 	Name string `json:"name"`
 	URL  string `json:"url,omitempty"`
 }
+
+// Grype structures for typed parsing of Grype vulnerability scan results
+// These types provide compile-time safety for vulnerability data parsing,
+// replacing brittle map[string]interface{} type assertions per BSI TR-03183 requirements.
+
+// GrypeScanResult represents the root structure of a Grype scan result
+type GrypeScanResult struct {
+	Matches    []GrypeMatch     `json:"matches"`
+	Source     *GrypeSource     `json:"source,omitempty"`
+	Distro     *GrypeDistro     `json:"distro,omitempty"`
+	Descriptor *GrypeDescriptor `json:"descriptor,omitempty"`
+}
+
+// GrypeMatch represents a vulnerability match in Grype results
+type GrypeMatch struct {
+	Vulnerability          GrypeVulnerability `json:"vulnerability"`
+	RelatedVulnerabilities []GrypeRelatedVuln `json:"relatedVulnerabilities,omitempty"`
+	MatchDetails           []GrypeMatchDetail `json:"matchDetails,omitempty"`
+	Artifact               GrypeArtifact      `json:"artifact"`
+}
+
+// GrypeVulnerability contains vulnerability metadata
+type GrypeVulnerability struct {
+	ID          string      `json:"id"`
+	DataSource  string      `json:"dataSource,omitempty"`
+	Namespace   string      `json:"namespace,omitempty"`
+	Severity    string      `json:"severity"`
+	URLs        []string    `json:"urls,omitempty"`
+	Description string      `json:"description,omitempty"`
+	CVSS        []GrypeCVSS `json:"cvss,omitempty"`
+	Fix         *GrypeFix   `json:"fix,omitempty"`
+}
+
+// GrypeCVSS contains CVSS score information
+type GrypeCVSS struct {
+	Version string                 `json:"version"`
+	Vector  string                 `json:"vector,omitempty"`
+	Metrics map[string]interface{} `json:"metrics,omitempty"`
+}
+
+// GrypeFix contains fix information for a vulnerability
+type GrypeFix struct {
+	Versions []string `json:"versions,omitempty"`
+	State    string   `json:"state,omitempty"`
+}
+
+// GrypeRelatedVuln represents related vulnerabilities (aliases)
+type GrypeRelatedVuln struct {
+	ID         string `json:"id"`
+	DataSource string `json:"dataSource,omitempty"`
+	Namespace  string `json:"namespace,omitempty"`
+}
+
+// GrypeMatchDetail contains match metadata
+type GrypeMatchDetail struct {
+	Type       string                 `json:"type"`
+	Matcher    string                 `json:"matcher"`
+	SearchedBy map[string]interface{} `json:"searchedBy,omitempty"`
+	Found      map[string]interface{} `json:"found,omitempty"`
+}
+
+// GrypeArtifact represents the artifact (package) associated with a match
+type GrypeArtifact struct {
+	Name      string                 `json:"name"`
+	Version   string                 `json:"version,omitempty"`
+	Type      string                 `json:"type,omitempty"`
+	Locations []GrypeLocation        `json:"locations,omitempty"`
+	Language  string                 `json:"language,omitempty"`
+	Licenses  []string               `json:"licenses,omitempty"`
+	CPEs      []string               `json:"cpes,omitempty"`
+	PURL      string                 `json:"purl,omitempty"`
+	Metadata  map[string]interface{} `json:"metadata,omitempty"`
+}
+
+// GrypeLocation represents a file system location
+type GrypeLocation struct {
+	Path    string `json:"path"`
+	LayerID string `json:"layerID,omitempty"`
+}
+
+// GrypeSource contains scan source metadata
+type GrypeSource struct {
+	Type   string      `json:"type"`
+	Target interface{} `json:"target,omitempty"`
+}
+
+// GrypeDistro contains distribution metadata
+type GrypeDistro struct {
+	Name    string   `json:"name,omitempty"`
+	Version string   `json:"version,omitempty"`
+	IDLike  []string `json:"idLike,omitempty"`
+}
+
+// GrypeDescriptor contains tool descriptor metadata
+type GrypeDescriptor struct {
+	Name    string `json:"name"`
+	Version string `json:"version"`
+}
