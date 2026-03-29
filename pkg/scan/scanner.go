@@ -15,15 +15,38 @@ import (
 	"github.com/anchore/syft/syft/sbom"
 )
 
+// VulnerabilityProvider defines interface for vulnerability database operations
+type VulnerabilityProvider interface {
+	FindMatches(ctx context.Context, packages interface{}, context interface{}) (interface{}, interface{}, error)
+}
+
+// GrypeAdapter wraps Grype's vulnerability matching
+type GrypeAdapter struct{}
+
+func (g *GrypeAdapter) FindMatches(ctx context.Context, sbomModel *sbom.SBOM, verbose bool) (*ScanResult, error) {
+	scanner := NewScanner(verbose)
+	return scanner.Scan(ctx, sbomModel)
+}
+
 // Scanner wraps native Grype library for vulnerability scanning
 type Scanner struct {
-	verbose bool
+	verbose          bool
+	vulnProviderFunc func(ctx context.Context, sbomModel *sbom.SBOM) (*ScanResult, error)
 }
 
 // NewScanner creates a new vulnerability scanner
 func NewScanner(verbose bool) *Scanner {
 	return &Scanner{
-		verbose: verbose,
+		verbose:          verbose,
+		vulnProviderFunc: nil,
+	}
+}
+
+// NewScannerWithMock creates a scanner with a mock vulnerability provider for testing
+func NewScannerWithMock(verbose bool, mockFunc func(ctx context.Context, sbomModel *sbom.SBOM) (*ScanResult, error)) *Scanner {
+	return &Scanner{
+		verbose:          verbose,
+		vulnProviderFunc: mockFunc,
 	}
 }
 
@@ -74,6 +97,10 @@ type CVSS struct {
 
 // Scan performs vulnerability scanning on an SBOM
 func (s *Scanner) Scan(ctx context.Context, sbomModel *sbom.SBOM) (*ScanResult, error) {
+	if s.vulnProviderFunc != nil {
+		return s.vulnProviderFunc(ctx, sbomModel)
+	}
+
 	if s.verbose {
 		fmt.Println("Loading vulnerability database...")
 	}

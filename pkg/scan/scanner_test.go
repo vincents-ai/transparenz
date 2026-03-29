@@ -1,9 +1,17 @@
 package scan
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"testing"
+
+	"github.com/anchore/syft/syft/sbom"
 )
+
+type mockSBOM struct{}
+
+func (m *mockSBOM) UnmarshalJSON([]byte) error { return nil }
 
 func TestFilterBySeverity(t *testing.T) {
 	tests := []struct {
@@ -584,6 +592,771 @@ func TestEdgeCases(t *testing.T) {
 		output := scanner.FormatTable(result)
 		if output == "" {
 			t.Error("expected non-empty table output")
+		}
+	})
+}
+
+func TestFilterBySeverityEdgeCases(t *testing.T) {
+	scanner := &Scanner{}
+
+	tests := []struct {
+		name        string
+		matches     []VulnerabilityMatch
+		minSeverity string
+		expected    int
+	}{
+		{
+			name: "unknown severity in match gets filtered",
+			matches: []VulnerabilityMatch{
+				{Vulnerability: Vulnerability{ID: "CVE-1", Severity: "Unknown"}},
+				{Vulnerability: Vulnerability{ID: "CVE-2", Severity: "High"}},
+			},
+			minSeverity: "High",
+			expected:    1,
+		},
+		{
+			name: "empty severity string",
+			matches: []VulnerabilityMatch{
+				{Vulnerability: Vulnerability{ID: "CVE-1", Severity: ""}},
+				{Vulnerability: Vulnerability{ID: "CVE-2", Severity: "High"}},
+			},
+			minSeverity: "High",
+			expected:    1,
+		},
+		{
+			name: "empty minSeverity returns all",
+			matches: []VulnerabilityMatch{
+				{Vulnerability: Vulnerability{ID: "CVE-1", Severity: "Critical"}},
+				{Vulnerability: Vulnerability{ID: "CVE-2", Severity: "Low"}},
+			},
+			minSeverity: "",
+			expected:    2,
+		},
+		{
+			name: "case sensitive severity",
+			matches: []VulnerabilityMatch{
+				{Vulnerability: Vulnerability{ID: "CVE-1", Severity: "critical"}},
+				{Vulnerability: Vulnerability{ID: "CVE-2", Severity: "HIGH"}},
+			},
+			minSeverity: "Critical",
+			expected:    0,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := scanner.FilterBySeverity(tt.matches, tt.minSeverity)
+			if len(result) != tt.expected {
+				t.Errorf("expected %d matches, got %d", tt.expected, len(result))
+			}
+		})
+	}
+}
+
+func TestFormatTableEdgeCases(t *testing.T) {
+	scanner := &Scanner{}
+
+	tests := []struct {
+		name   string
+		result *ScanResult
+	}{
+		{
+			name: "package name exactly 41 chars gets truncated",
+			result: &ScanResult{
+				Matches: []VulnerabilityMatch{
+					{
+						Vulnerability: Vulnerability{ID: "CVE-1", Severity: "High"},
+						Package:       Package{Name: "12345678901234567890123456789012345678901", Version: "1.0"},
+					},
+				},
+			},
+		},
+		{
+			name: "very long vulnerability ID",
+			result: &ScanResult{
+				Matches: []VulnerabilityMatch{
+					{
+						Vulnerability: Vulnerability{ID: "CVE-VERY-LONG-ID-THAT-MIGHT-AFFECT-FORMATTING-2021-1234", Severity: "Critical"},
+						Package:       Package{Name: "pkg", Version: "1.0"},
+					},
+				},
+			},
+		},
+		{
+			name: "empty version",
+			result: &ScanResult{
+				Matches: []VulnerabilityMatch{
+					{
+						Vulnerability: Vulnerability{ID: "CVE-1", Severity: "High"},
+						Package:       Package{Name: "test-pkg", Version: ""},
+					},
+				},
+			},
+		},
+		{
+			name: "many vulnerabilities in table",
+			result: &ScanResult{
+				Matches: []VulnerabilityMatch{
+					{Vulnerability: Vulnerability{ID: "CVE-1", Severity: "Critical"}, Package: Package{Name: "p1", Version: "1.0"}},
+					{Vulnerability: Vulnerability{ID: "CVE-2", Severity: "High"}, Package: Package{Name: "p2", Version: "2.0"}},
+					{Vulnerability: Vulnerability{ID: "CVE-3", Severity: "Medium"}, Package: Package{Name: "p3", Version: "3.0"}},
+					{Vulnerability: Vulnerability{ID: "CVE-4", Severity: "Low"}, Package: Package{Name: "p4", Version: "4.0"}},
+					{Vulnerability: Vulnerability{ID: "CVE-5", Severity: "Negligible"}, Package: Package{Name: "p5", Version: "5.0"}},
+					{Vulnerability: Vulnerability{ID: "CVE-6", Severity: "Critical"}, Package: Package{Name: "p6", Version: "6.0"}},
+					{Vulnerability: Vulnerability{ID: "CVE-7", Severity: "High"}, Package: Package{Name: "p7", Version: "7.0"}},
+					{Vulnerability: Vulnerability{ID: "CVE-8", Severity: "Medium"}, Package: Package{Name: "p8", Version: "8.0"}},
+					{Vulnerability: Vulnerability{ID: "CVE-9", Severity: "Low"}, Package: Package{Name: "p9", Version: "9.0"}},
+					{Vulnerability: Vulnerability{ID: "CVE-10", Severity: "Negligible"}, Package: Package{Name: "p10", Version: "10.0"}},
+				},
+			},
+		},
+		{
+			name: "package name with colons",
+			result: &ScanResult{
+				Matches: []VulnerabilityMatch{
+					{
+						Vulnerability: Vulnerability{ID: "CVE-1", Severity: "High"},
+						Package:       Package{Name: "npm:@scope/package", Version: "1.0.0"},
+					},
+				},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			output := scanner.FormatTable(tt.result)
+			if output == "" {
+				t.Error("expected non-empty table output")
+			}
+			if !contains(output, "Total vulnerabilities:") {
+				t.Error("expected total count in output")
+			}
+		})
+	}
+}
+
+func TestFormatJSONEdgeCases(t *testing.T) {
+	scanner := &Scanner{}
+
+	tests := []struct {
+		name   string
+		result *ScanResult
+	}{
+		{
+			name: "nil matches",
+			result: &ScanResult{
+				Matches: nil,
+			},
+		},
+		{
+			name: "nil ignored matches",
+			result: &ScanResult{
+				Matches:        []VulnerabilityMatch{},
+				IgnoredMatches: nil,
+			},
+		},
+		{
+			name: "source is nil",
+			result: &ScanResult{
+				Matches: []VulnerabilityMatch{
+					{Vulnerability: Vulnerability{ID: "CVE-1", Severity: "High"}, Package: Package{Name: "pkg", Version: "1.0"}},
+				},
+				Source: nil,
+			},
+		},
+		{
+			name: "empty vulnerability ID",
+			result: &ScanResult{
+				Matches: []VulnerabilityMatch{
+					{Vulnerability: Vulnerability{ID: "", Severity: "High"}, Package: Package{Name: "pkg", Version: "1.0"}},
+				},
+			},
+		},
+		{
+			name: "empty URLs and CVSS",
+			result: &ScanResult{
+				Matches: []VulnerabilityMatch{
+					{
+						Vulnerability: Vulnerability{
+							ID:       "CVE-1",
+							Severity: "High",
+							URLs:     []string{},
+							CVSS:     []CVSS{},
+						},
+						Package: Package{Name: "pkg", Version: "1.0"},
+					},
+				},
+			},
+		},
+		{
+			name: "multiple CVSS entries",
+			result: &ScanResult{
+				Matches: []VulnerabilityMatch{
+					{
+						Vulnerability: Vulnerability{
+							ID:       "CVE-1",
+							Severity: "High",
+							CVSS: []CVSS{
+								{Version: "2.0", Vector: "AV:N/AC:L/Au:N/C:C/I:C/A:C", Score: 10.0},
+								{Version: "3.0", Vector: "CVSS:3.0/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H", Score: 9.8},
+								{Version: "3.1", Vector: "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H", Score: 9.1},
+							},
+						},
+						Package: Package{Name: "pkg", Version: "1.0"},
+					},
+				},
+			},
+		},
+		{
+			name: "package with PURL only",
+			result: &ScanResult{
+				Matches: []VulnerabilityMatch{
+					{
+						Vulnerability: Vulnerability{ID: "CVE-1", Severity: "High"},
+						Package:       Package{Name: "pkg", Version: "1.0", PURL: "pkg:generic/pkg@1.0"},
+					},
+				},
+			},
+		},
+		{
+			name: "unicode in description",
+			result: &ScanResult{
+				Matches: []VulnerabilityMatch{
+					{
+						Vulnerability: Vulnerability{
+							ID:          "CVE-2021-1234",
+							Severity:    "High",
+							Description: "Unicode test: äöü ß 中文 日本語 🎉",
+						},
+						Package: Package{Name: "pkg", Version: "1.0"},
+					},
+				},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			jsonStr, err := scanner.FormatJSON(tt.result)
+			if err != nil {
+				t.Errorf("FormatJSON returned error: %v", err)
+			}
+			if jsonStr == "" {
+				t.Error("expected non-empty JSON string")
+			}
+			var result ScanResult
+			if err := json.Unmarshal([]byte(jsonStr), &result); err != nil {
+				t.Errorf("failed to unmarshal JSON: %v", err)
+			}
+		})
+	}
+}
+
+func TestScanResultWithMockFixtures(t *testing.T) {
+	t.Run("complex scan result with all fields", func(t *testing.T) {
+		result := &ScanResult{
+			Matches: []VulnerabilityMatch{
+				{
+					Vulnerability: Vulnerability{
+						ID:          "CVE-2021-0001",
+						Severity:    "Critical",
+						Description: "Remote code execution via buffer overflow",
+						URLs: []string{
+							"https://nvd.nist.gov/vuln/detail/CVE-2021-0001",
+							"https://example.com/advisory/001",
+						},
+						CVSS: []CVSS{
+							{
+								Version: "3.1",
+								Vector:  "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H",
+								Score:   9.8,
+							},
+						},
+					},
+					Package: Package{
+						Name:    "openssl",
+						Version: "1.1.1k",
+						Type:    "rpm",
+						PURL:    "pkg:rpm/openssl@1.1.1k",
+					},
+					MatchDetails: []MatchDetail{
+						{
+							Type:       "exactMatch",
+							Confidence: "1.00",
+							Matcher:    "stock-matcher",
+						},
+					},
+				},
+				{
+					Vulnerability: Vulnerability{
+						ID:       "CVE-2021-0002",
+						Severity: "High",
+					},
+					Package: Package{
+						Name:    "curl",
+						Version: "7.77.0",
+						Type:    "deb",
+					},
+					MatchDetails: []MatchDetail{
+						{
+							Type:       "fuzzyMatch",
+							Confidence: "0.85",
+							Matcher:    "stock-matcher",
+						},
+						{
+							Type:       "cpeMatch",
+							Confidence: "0.90",
+							Matcher:    "stock-matcher",
+						},
+					},
+				},
+			},
+			IgnoredMatches: []VulnerabilityMatch{
+				{
+					Vulnerability: Vulnerability{
+						ID:       "CVE-2021-0003",
+						Severity: "Medium",
+					},
+					Package: Package{
+						Name:    "python",
+						Version: "3.9.0",
+						Type:    "python",
+					},
+				},
+			},
+		}
+
+		scanner := &Scanner{}
+		jsonStr, err := scanner.FormatJSON(result)
+		if err != nil {
+			t.Fatalf("FormatJSON failed: %v", err)
+		}
+
+		var parsed ScanResult
+		if err := json.Unmarshal([]byte(jsonStr), &parsed); err != nil {
+			t.Fatalf("failed to unmarshal: %v", err)
+		}
+
+		if len(parsed.Matches) != 2 {
+			t.Errorf("expected 2 matches, got %d", len(parsed.Matches))
+		}
+		if len(parsed.IgnoredMatches) != 1 {
+			t.Errorf("expected 1 ignored match, got %d", len(parsed.IgnoredMatches))
+		}
+		if len(parsed.Matches[0].MatchDetails) != 1 {
+			t.Errorf("expected 1 match detail, got %d", len(parsed.Matches[0].MatchDetails))
+		}
+		if len(parsed.Matches[1].MatchDetails) != 2 {
+			t.Errorf("expected 2 match details, got %d", len(parsed.Matches[1].MatchDetails))
+		}
+
+		tableOutput := scanner.FormatTable(result)
+		if !contains(tableOutput, "openssl:1.1.1k") {
+			t.Error("expected openssl package in table output")
+		}
+		if !contains(tableOutput, "curl:7.77.0") {
+			t.Error("expected curl package in table output")
+		}
+	})
+
+	t.Run("filter complex results", func(t *testing.T) {
+		matches := []VulnerabilityMatch{
+			{Vulnerability: Vulnerability{ID: "CVE-CRIT-1", Severity: "Critical"}, Package: Package{Name: "c1", Version: "1.0"}},
+			{Vulnerability: Vulnerability{ID: "CVE-CRIT-2", Severity: "Critical"}, Package: Package{Name: "c2", Version: "1.0"}},
+			{Vulnerability: Vulnerability{ID: "CVE-HIGH-1", Severity: "High"}, Package: Package{Name: "h1", Version: "1.0"}},
+			{Vulnerability: Vulnerability{ID: "CVE-HIGH-2", Severity: "High"}, Package: Package{Name: "h2", Version: "1.0"}},
+			{Vulnerability: Vulnerability{ID: "CVE-MED-1", Severity: "Medium"}, Package: Package{Name: "m1", Version: "1.0"}},
+			{Vulnerability: Vulnerability{ID: "CVE-LOW-1", Severity: "Low"}, Package: Package{Name: "l1", Version: "1.0"}},
+			{Vulnerability: Vulnerability{ID: "CVE-NEG-1", Severity: "Negligible"}, Package: Package{Name: "n1", Version: "1.0"}},
+		}
+
+		scanner := &Scanner{}
+
+		criticalOnly := scanner.FilterBySeverity(matches, "Critical")
+		if len(criticalOnly) != 2 {
+			t.Errorf("expected 2 critical, got %d", len(criticalOnly))
+		}
+
+		highAndAbove := scanner.FilterBySeverity(matches, "High")
+		if len(highAndAbove) != 4 {
+			t.Errorf("expected 4 high+, got %d", len(highAndAbove))
+		}
+
+		mediumAndAbove := scanner.FilterBySeverity(matches, "Medium")
+		if len(mediumAndAbove) != 5 {
+			t.Errorf("expected 5 medium+, got %d", len(mediumAndAbove))
+		}
+
+		lowAndAbove := scanner.FilterBySeverity(matches, "Low")
+		if len(lowAndAbove) != 6 {
+			t.Errorf("expected 6 low+, got %d", len(lowAndAbove))
+		}
+	})
+}
+
+func contains(s, substr string) bool {
+	return len(s) >= len(substr) && (s == substr || len(s) > 0 && containsAt(s, substr))
+}
+
+func containsAt(s, substr string) bool {
+	for i := 0; i <= len(s)-len(substr); i++ {
+		if s[i:i+len(substr)] == substr {
+			return true
+		}
+	}
+	return false
+}
+
+func TestScanWithMocks(t *testing.T) {
+	t.Run("Scan returns error when mock returns error", func(t *testing.T) {
+		mockErr := errors.New("database connection failed")
+		scanner := NewScannerWithMock(false, func(ctx context.Context, sbomModel *sbom.SBOM) (*ScanResult, error) {
+			return nil, mockErr
+		})
+
+		result, err := scanner.Scan(context.Background(), &sbom.SBOM{})
+		if err == nil {
+			t.Error("expected error, got nil")
+		}
+		if err != mockErr {
+			t.Errorf("expected error %v, got %v", mockErr, err)
+		}
+		if result != nil {
+			t.Error("expected nil result")
+		}
+	})
+
+	t.Run("Scan returns mock result successfully", func(t *testing.T) {
+		expectedResult := &ScanResult{
+			Matches: []VulnerabilityMatch{
+				{
+					Vulnerability: Vulnerability{
+						ID:       "CVE-MOCK-1",
+						Severity: "High",
+					},
+					Package: Package{
+						Name:    "mock-pkg",
+						Version: "1.0.0",
+					},
+				},
+			},
+		}
+		scanner := NewScannerWithMock(true, func(ctx context.Context, sbomModel *sbom.SBOM) (*ScanResult, error) {
+			return expectedResult, nil
+		})
+
+		result, err := scanner.Scan(context.Background(), &sbom.SBOM{})
+		if err != nil {
+			t.Errorf("unexpected error: %v", err)
+		}
+		if result == nil {
+			t.Fatal("expected result, got nil")
+		}
+		if len(result.Matches) != 1 {
+			t.Errorf("expected 1 match, got %d", len(result.Matches))
+		}
+		if result.Matches[0].Vulnerability.ID != "CVE-MOCK-1" {
+			t.Errorf("expected CVE-MOCK-1, got %s", result.Matches[0].Vulnerability.ID)
+		}
+	})
+
+	t.Run("Scan returns empty matches", func(t *testing.T) {
+		scanner := NewScannerWithMock(false, func(ctx context.Context, sbomModel *sbom.SBOM) (*ScanResult, error) {
+			return &ScanResult{
+				Matches:        []VulnerabilityMatch{},
+				IgnoredMatches: []VulnerabilityMatch{},
+				Source:         nil,
+			}, nil
+		})
+
+		result, err := scanner.Scan(context.Background(), &sbom.SBOM{})
+		if err != nil {
+			t.Errorf("unexpected error: %v", err)
+		}
+		if len(result.Matches) != 0 {
+			t.Errorf("expected 0 matches, got %d", len(result.Matches))
+		}
+	})
+
+	t.Run("Scan with ignored matches", func(t *testing.T) {
+		scanner := NewScannerWithMock(false, func(ctx context.Context, sbomModel *sbom.SBOM) (*ScanResult, error) {
+			return &ScanResult{
+				Matches: []VulnerabilityMatch{
+					{Vulnerability: Vulnerability{ID: "CVE-1", Severity: "High"}, Package: Package{Name: "pkg1", Version: "1.0"}},
+				},
+				IgnoredMatches: []VulnerabilityMatch{
+					{Vulnerability: Vulnerability{ID: "CVE-IGNORED-1", Severity: "Low"}, Package: Package{Name: "pkg2", Version: "2.0"}},
+					{Vulnerability: Vulnerability{ID: "CVE-IGNORED-2", Severity: "Medium"}, Package: Package{Name: "pkg3", Version: "3.0"}},
+				},
+				Source: nil,
+			}, nil
+		})
+
+		result, err := scanner.Scan(context.Background(), &sbom.SBOM{})
+		if err != nil {
+			t.Errorf("unexpected error: %v", err)
+		}
+		if len(result.Matches) != 1 {
+			t.Errorf("expected 1 match, got %d", len(result.Matches))
+		}
+		if len(result.IgnoredMatches) != 2 {
+			t.Errorf("expected 2 ignored matches, got %d", len(result.IgnoredMatches))
+		}
+	})
+
+	t.Run("Scan with complex mock result", func(t *testing.T) {
+		scanner := NewScannerWithMock(true, func(ctx context.Context, sbomModel *sbom.SBOM) (*ScanResult, error) {
+			return &ScanResult{
+				Matches: []VulnerabilityMatch{
+					{
+						Vulnerability: Vulnerability{
+							ID:          "CVE-2024-0001",
+							Severity:    "Critical",
+							Description: "A critical RCE vulnerability",
+							URLs:        []string{"https://nvd.example.com/CVE-2024-0001"},
+							CVSS: []CVSS{
+								{Version: "3.1", Vector: "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H", Score: 9.8},
+							},
+						},
+						Package: Package{
+							Name:    "vulnerable-lib",
+							Version: "2.5.1",
+							Type:    "npm",
+							PURL:    "pkg:npm/vulnerable-lib@2.5.1",
+						},
+						MatchDetails: []MatchDetail{
+							{Type: "exactMatch", Confidence: "1.00", Matcher: "stock-matcher"},
+						},
+					},
+					{
+						Vulnerability: Vulnerability{
+							ID:       "CVE-2024-0002",
+							Severity: "Medium",
+						},
+						Package: Package{
+							Name:    "another-lib",
+							Version: "1.2.3",
+							Type:    "go",
+						},
+						MatchDetails: []MatchDetail{},
+					},
+				},
+				IgnoredMatches: []VulnerabilityMatch{},
+				Source:         nil,
+			}, nil
+		})
+
+		result, err := scanner.Scan(context.Background(), &sbom.SBOM{})
+		if err != nil {
+			t.Errorf("unexpected error: %v", err)
+		}
+
+		jsonStr, err := scanner.FormatJSON(result)
+		if err != nil {
+			t.Errorf("FormatJSON failed: %v", err)
+		}
+
+		var parsed ScanResult
+		if err := json.Unmarshal([]byte(jsonStr), &parsed); err != nil {
+			t.Errorf("failed to unmarshal: %v", err)
+		}
+
+		if len(parsed.Matches) != 2 {
+			t.Errorf("expected 2 matches, got %d", len(parsed.Matches))
+		}
+
+		tableOutput := scanner.FormatTable(result)
+		if !contains(tableOutput, "vulnerable-lib:2.5.1") {
+			t.Error("expected vulnerable-lib in table output")
+		}
+	})
+
+	t.Run("Scan context cancellation", func(t *testing.T) {
+		scanner := NewScannerWithMock(false, func(ctx context.Context, sbomModel *sbom.SBOM) (*ScanResult, error) {
+			if ctx.Err() != nil {
+				return nil, ctx.Err()
+			}
+			return &ScanResult{Matches: []VulnerabilityMatch{}}, nil
+		})
+
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+
+		result, err := scanner.Scan(ctx, &sbom.SBOM{})
+		if err == nil {
+			t.Error("expected context cancellation error")
+		}
+		if result != nil {
+			t.Error("expected nil result on error")
+		}
+	})
+}
+
+func TestConvertMatchCoverage(t *testing.T) {
+	t.Run("convertMatch with full metadata", func(t *testing.T) {
+		scanner := NewScanner(false)
+
+		result := &ScanResult{
+			Matches: []VulnerabilityMatch{
+				{
+					Vulnerability: Vulnerability{
+						ID:          "CVE-TEST-1",
+						Severity:    "High",
+						Description: "Test description",
+						URLs:        []string{"url1", "url2"},
+						CVSS: []CVSS{
+							{Version: "3.1", Vector: "test", Score: 7.5},
+						},
+					},
+					Package: Package{
+						Name:    "test-pkg",
+						Version: "1.0",
+						Type:    "npm",
+						PURL:    "pkg:npm/test-pkg@1.0",
+					},
+					MatchDetails: []MatchDetail{
+						{Type: "exact", Confidence: "0.95", Matcher: "stock"},
+					},
+				},
+			},
+		}
+
+		jsonStr, err := scanner.FormatJSON(result)
+		if err != nil {
+			t.Errorf("FormatJSON error: %v", err)
+		}
+
+		var parsed ScanResult
+		if err := json.Unmarshal([]byte(jsonStr), &parsed); err != nil {
+			t.Errorf("Unmarshal error: %v", err)
+		}
+
+		if len(parsed.Matches[0].MatchDetails) != 1 {
+			t.Errorf("expected 1 match detail, got %d", len(parsed.Matches[0].MatchDetails))
+		}
+	})
+
+	t.Run("convertMatch with empty metadata", func(t *testing.T) {
+		scanner := NewScanner(false)
+
+		result := &ScanResult{
+			Matches: []VulnerabilityMatch{
+				{
+					Vulnerability: Vulnerability{
+						ID:       "CVE-TEST-2",
+						Severity: "Unknown",
+					},
+					Package: Package{
+						Name:    "test-pkg",
+						Version: "1.0",
+					},
+				},
+			},
+		}
+
+		jsonStr, err := scanner.FormatJSON(result)
+		if err != nil {
+			t.Errorf("FormatJSON error: %v", err)
+		}
+
+		var parsed ScanResult
+		if err := json.Unmarshal([]byte(jsonStr), &parsed); err != nil {
+			t.Errorf("Unmarshal error: %v", err)
+		}
+
+		if parsed.Matches[0].Vulnerability.Severity != "Unknown" {
+			t.Errorf("expected Unknown severity, got %s", parsed.Matches[0].Vulnerability.Severity)
+		}
+	})
+}
+
+func TestAdditionalEdgeCases(t *testing.T) {
+	t.Run("FormatTable package name at boundary 40 chars", func(t *testing.T) {
+		scanner := NewScanner(false)
+		result := &ScanResult{
+			Matches: []VulnerabilityMatch{
+				{
+					Vulnerability: Vulnerability{ID: "CVE-1", Severity: "High"},
+					Package:       Package{Name: "1234567890123456789012345678901234567890", Version: "1.0"},
+				},
+			},
+		}
+		output := scanner.FormatTable(result)
+		if output == "" {
+			t.Error("expected non-empty output")
+		}
+	})
+
+	t.Run("FormatTable package name 41 chars gets truncated", func(t *testing.T) {
+		scanner := NewScanner(false)
+		result := &ScanResult{
+			Matches: []VulnerabilityMatch{
+				{
+					Vulnerability: Vulnerability{ID: "CVE-1", Severity: "High"},
+					Package:       Package{Name: "12345678901234567890123456789012345678901", Version: "1.0"},
+				},
+			},
+		}
+		output := scanner.FormatTable(result)
+		if output == "" {
+			t.Error("expected non-empty output")
+		}
+	})
+
+	t.Run("FormatTable very short vulnerability ID", func(t *testing.T) {
+		scanner := NewScanner(false)
+		result := &ScanResult{
+			Matches: []VulnerabilityMatch{
+				{
+					Vulnerability: Vulnerability{ID: "C", Severity: "High"},
+					Package:       Package{Name: "pkg", Version: "1.0"},
+				},
+			},
+		}
+		output := scanner.FormatTable(result)
+		if !contains(output, "C") {
+			t.Error("short ID should be in output")
+		}
+	})
+
+	t.Run("Multiple match details in table", func(t *testing.T) {
+		scanner := NewScanner(false)
+		result := &ScanResult{
+			Matches: []VulnerabilityMatch{
+				{
+					Vulnerability: Vulnerability{ID: "CVE-1", Severity: "Critical"},
+					Package:       Package{Name: "pkg", Version: "1.0"},
+					MatchDetails: []MatchDetail{
+						{Type: "exact", Confidence: "1.00", Matcher: "stock"},
+						{Type: "cpe", Confidence: "0.90", Matcher: "stock"},
+						{Type: "fuzzy", Confidence: "0.75", Matcher: "stock"},
+					},
+				},
+			},
+		}
+		output := scanner.FormatTable(result)
+		if !contains(output, "Total vulnerabilities: 1") {
+			t.Error("should show 1 vulnerability")
+		}
+	})
+
+	t.Run("FormatJSON with many matches", func(t *testing.T) {
+		scanner := NewScanner(false)
+		matches := make([]VulnerabilityMatch, 100)
+		for i := 0; i < 100; i++ {
+			matches[i] = VulnerabilityMatch{
+				Vulnerability: Vulnerability{ID: "CVE-2021-" + string(rune(i)), Severity: "High"},
+				Package:       Package{Name: "pkg", Version: "1.0"},
+			}
+		}
+		result := &ScanResult{Matches: matches}
+		jsonStr, err := scanner.FormatJSON(result)
+		if err != nil {
+			t.Errorf("FormatJSON error: %v", err)
+		}
+		if len(jsonStr) == 0 {
+			t.Error("expected non-empty JSON")
 		}
 	})
 }
