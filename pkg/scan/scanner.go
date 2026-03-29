@@ -20,10 +20,32 @@ type VulnerabilityProvider interface {
 	FindMatches(ctx context.Context, packages interface{}, context interface{}) (interface{}, interface{}, error)
 }
 
+// VulnerabilityScanner defines interface for scanning SBOMs
+type VulnerabilityScanner interface {
+	Scan(ctx context.Context, sbomModel *sbom.SBOM) (*ScanResult, error)
+}
+
 // GrypeAdapter wraps Grype's vulnerability matching
-type GrypeAdapter struct{}
+type GrypeAdapter struct {
+	scanner VulnerabilityScanner
+}
+
+func NewGrypeAdapter() *GrypeAdapter {
+	return &GrypeAdapter{
+		scanner: nil,
+	}
+}
+
+func NewGrypeAdapterWithScanner(scanner VulnerabilityScanner) *GrypeAdapter {
+	return &GrypeAdapter{
+		scanner: scanner,
+	}
+}
 
 func (g *GrypeAdapter) FindMatches(ctx context.Context, sbomModel *sbom.SBOM, verbose bool) (*ScanResult, error) {
+	if g.scanner != nil {
+		return g.scanner.Scan(ctx, sbomModel)
+	}
 	scanner := NewScanner(verbose)
 	return scanner.Scan(ctx, sbomModel)
 }

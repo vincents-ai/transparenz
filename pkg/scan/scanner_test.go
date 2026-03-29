@@ -1009,11 +1009,50 @@ func containsAt(s, substr string) bool {
 }
 
 func TestGrypeAdapter_FindMatches(t *testing.T) {
-	t.Run("FindMatches uses NewScanner", func(t *testing.T) {
-		_ = &GrypeAdapter{}
-		scanner := NewScanner(false)
-		if scanner == nil {
+	t.Run("NewGrypeAdapter creates adapter with nil scanner (uses fallback)", func(t *testing.T) {
+		adapter := NewGrypeAdapter()
+		if adapter.scanner != nil {
+			t.Error("expected nil scanner")
+		}
+	})
+
+	t.Run("NewGrypeAdapterWithScanner creates adapter with injected scanner", func(t *testing.T) {
+		mockScanner := NewScannerWithMock(false, func(ctx context.Context, sbomModel *sbom.SBOM) (*ScanResult, error) {
+			return &ScanResult{
+				Matches: []VulnerabilityMatch{
+					{Vulnerability: Vulnerability{ID: "CVE-MOCK-1", Severity: "High"}, Package: Package{Name: "test", Version: "1.0"}},
+				},
+			}, nil
+		})
+		adapter := NewGrypeAdapterWithScanner(mockScanner)
+		if adapter.scanner == nil {
 			t.Error("expected non-nil scanner")
+		}
+
+		result, err := adapter.FindMatches(context.Background(), &sbom.SBOM{}, false)
+		if err != nil {
+			t.Errorf("unexpected error: %v", err)
+		}
+		if result == nil {
+			t.Fatal("expected result, got nil")
+		}
+		if len(result.Matches) != 1 {
+			t.Errorf("expected 1 match, got %d", len(result.Matches))
+		}
+	})
+
+	t.Run("FindMatches returns error when scanner returns error", func(t *testing.T) {
+		mockScanner := NewScannerWithMock(false, func(ctx context.Context, sbomModel *sbom.SBOM) (*ScanResult, error) {
+			return nil, errors.New("scanner error")
+		})
+		adapter := NewGrypeAdapterWithScanner(mockScanner)
+
+		result, err := adapter.FindMatches(context.Background(), &sbom.SBOM{}, false)
+		if err == nil {
+			t.Error("expected error, got nil")
+		}
+		if result != nil {
+			t.Error("expected nil result")
 		}
 	})
 
@@ -1456,6 +1495,106 @@ func TestConvertMatchCoverage(t *testing.T) {
 
 		if parsed.Matches[0].Vulnerability.Severity != "Unknown" {
 			t.Errorf("expected Unknown severity, got %s", parsed.Matches[0].Vulnerability.Severity)
+		}
+	})
+}
+
+func TestScanWithMockFullCoverage(t *testing.T) {
+	t.Run("Scan with empty SBOM returns empty matches", func(t *testing.T) {
+		scanner := NewScannerWithMock(false, func(ctx context.Context, sbomModel *sbom.SBOM) (*ScanResult, error) {
+			return &ScanResult{
+				Matches:        []VulnerabilityMatch{},
+				IgnoredMatches: []VulnerabilityMatch{},
+				Source:         sbomModel,
+			}, nil
+		})
+
+		result, err := scanner.Scan(context.Background(), &sbom.SBOM{})
+		if err != nil {
+			t.Errorf("unexpected error: %v", err)
+		}
+		if len(result.Matches) != 0 {
+			t.Errorf("expected 0 matches, got %d", len(result.Matches))
+		}
+	})
+
+	t.Run("Scan with nil source", func(t *testing.T) {
+		scanner := NewScannerWithMock(false, func(ctx context.Context, sbomModel *sbom.SBOM) (*ScanResult, error) {
+			return &ScanResult{
+				Matches: []VulnerabilityMatch{},
+				Source:  nil,
+			}, nil
+		})
+
+		result, err := scanner.Scan(context.Background(), nil)
+		if err != nil {
+			t.Errorf("unexpected error: %v", err)
+		}
+		if result == nil {
+			t.Error("expected result, got nil")
+		}
+	})
+
+	t.Run("Scan with verbose and mock returns result", func(t *testing.T) {
+		expectedMatches := []VulnerabilityMatch{
+			{Vulnerability: Vulnerability{ID: "CVE-VERBOSE-1", Severity: "Critical"}, Package: Package{Name: "verbose-pkg", Version: "1.0"}},
+		}
+		scanner := NewScannerWithMock(true, func(ctx context.Context, sbomModel *sbom.SBOM) (*ScanResult, error) {
+			return &ScanResult{
+				Matches: expectedMatches,
+				Source:  sbomModel,
+			}, nil
+		})
+
+		result, err := scanner.Scan(context.Background(), &sbom.SBOM{})
+		if err != nil {
+			t.Errorf("unexpected error: %v", err)
+		}
+		if len(result.Matches) != 1 {
+			t.Errorf("expected 1 match, got %d", len(result.Matches))
+		}
+		if result.Matches[0].Vulnerability.ID != "CVE-VERBOSE-1" {
+			t.Errorf("expected CVE-VERBOSE-1, got %s", result.Matches[0].Vulnerability.ID)
+		}
+	})
+
+	t.Run("Scan error propagation from mock", func(t *testing.T) {
+		scanner := NewScannerWithMock(false, func(ctx context.Context, sbomModel *sbom.SBOM) (*ScanResult, error) {
+			return nil, errors.New("mock database error")
+		})
+
+		result, err := scanner.Scan(context.Background(), &sbom.SBOM{})
+		if err == nil {
+			t.Error("expected error, got nil")
+		}
+		if result != nil {
+			t.Error("expected nil result on error")
+		}
+	})
+
+	t.Run("Scan with ignored matches in mock", func(t *testing.T) {
+		scanner := NewScannerWithMock(false, func(ctx context.Context, sbomModel *sbom.SBOM) (*ScanResult, error) {
+			return &ScanResult{
+				Matches: []VulnerabilityMatch{
+					{Vulnerability: Vulnerability{ID: "CVE-ACTIVE", Severity: "High"}, Package: Package{Name: "active", Version: "1.0"}},
+				},
+				IgnoredMatches: []VulnerabilityMatch{
+					{Vulnerability: Vulnerability{ID: "CVE-IGNORED-1", Severity: "Low"}, Package: Package{Name: "ignored1", Version: "1.0"}},
+					{Vulnerability: Vulnerability{ID: "CVE-IGNORED-2", Severity: "Medium"}, Package: Package{Name: "ignored2", Version: "2.0"}},
+				},
+				Source: sbomModel,
+			}, nil
+		})
+
+		result, err := scanner.Scan(context.Background(), &sbom.SBOM{})
+		if err != nil {
+			t.Errorf("unexpected error: %v", err)
+		}
+		if len(result.Matches) != 1 {
+			t.Errorf("expected 1 active match, got %d", len(result.Matches))
+		}
+		if len(result.IgnoredMatches) != 2 {
+			t.Errorf("expected 2 ignored matches, got %d", len(result.IgnoredMatches))
 		}
 	})
 }

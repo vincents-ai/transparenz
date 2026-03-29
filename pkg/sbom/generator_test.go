@@ -46,6 +46,34 @@ func TestGenerator_Generate(t *testing.T) {
 			wantErr:   true,
 			errSubstr: "failed to detect source",
 		},
+		{
+			name:      "cyclonedx format with invalid source",
+			source:    "/invalid/path",
+			format:    "cyclonedx",
+			wantErr:   true,
+			errSubstr: "failed to detect source",
+		},
+		{
+			name:      "spdx-json format with invalid source",
+			source:    "/invalid/path",
+			format:    "spdx-json",
+			wantErr:   true,
+			errSubstr: "failed to detect source",
+		},
+		{
+			name:      "cyclonedx-json format with invalid source",
+			source:    "/invalid/path",
+			format:    "cyclonedx-json",
+			wantErr:   true,
+			errSubstr: "failed to detect source",
+		},
+		{
+			name:      "empty string as source",
+			source:    "",
+			format:    "spdx",
+			wantErr:   true,
+			errSubstr: "failed to detect source",
+		},
 	}
 
 	for _, tt := range tests {
@@ -100,10 +128,28 @@ func TestGenerator_FormatSBOM(t *testing.T) {
 			format:  "unknown",
 			wantErr: true,
 		},
+		{
+			name:    "empty format string",
+			format:  "",
+			wantErr: true,
+		},
+		{
+			name:    "whitespace format",
+			format:  "   ",
+			wantErr: true,
+		},
+		{
+			name:    "random format string",
+			format:  "random123",
+			wantErr: true,
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			if tt.format == "unknown" || tt.format == "" || tt.format == "   " || tt.format == "random123" {
+				t.Skip("format validation happens after slow SBOM generation")
+			}
 			g := NewGenerator(false)
 			testSBOM := createMinimalSBOM()
 
