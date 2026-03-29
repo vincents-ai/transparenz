@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+export PYTHONPATH="$SCRIPT_DIR/../../src:$PYTHONPATH"
+exec /nix/store/akn6n0m9svv94i4imzmg6whparngsiv3-python3-3.11.14-env/bin/python -m transparenz.cli "$@"

@@ -96,7 +96,7 @@ func (s *Scanner) Scan(ctx context.Context, sbomModel *sbom.SBOM) (*ScanResult, 
 	}
 
 	if s.verbose && status != nil {
-		fmt.Printf("Vulnerability database loaded (version: %d)\n", status.SchemaVersion)
+		fmt.Printf("Vulnerability database loaded (version: %s)\n", status.SchemaVersion)
 	}
 
 	// Convert Syft packages to Grype package format
