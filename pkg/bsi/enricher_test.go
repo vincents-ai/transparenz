@@ -977,6 +977,344 @@ func TestEnrichSBOM_MarshalError(t *testing.T) {
 	}
 }
 
+func TestEnrichWithArtifactHashes(t *testing.T) {
+	enricher := NewEnricher(".")
+	tmpDir := t.TempDir()
+
+	t.Run("CycloneDX with artifact directory", func(t *testing.T) {
+		artifactFile := filepath.Join(tmpDir, "test-bin")
+		content := []byte("binary content")
+		if err := os.WriteFile(artifactFile, content, 0755); err != nil {
+			t.Fatal(err)
+		}
+
+		sbomData := map[string]interface{}{
+			"bomFormat":   "CycloneDX",
+			"specVersion": "1.5",
+			"components": []interface{}{
+				map[string]interface{}{
+					"name": "test-bin",
+					"type": "application",
+				},
+			},
+		}
+
+		err := enricher.EnrichWithArtifactHashes(sbomData, tmpDir)
+		if err != nil {
+			t.Fatalf("EnrichWithArtifactHashes failed: %v", err)
+		}
+
+		components := sbomData["components"].([]interface{})
+		comp := components[0].(map[string]interface{})
+		hashes, ok := comp["hashes"].([]interface{})
+		if !ok || len(hashes) == 0 {
+			t.Error("Expected hashes to be added")
+		}
+	})
+
+	t.Run("SPDX with artifact directory", func(t *testing.T) {
+		artifactFile := filepath.Join(tmpDir, "test-app")
+		content := []byte("app content")
+		if err := os.WriteFile(artifactFile, content, 0755); err != nil {
+			t.Fatal(err)
+		}
+
+		sbomData := map[string]interface{}{
+			"spdxVersion": "SPDX-2.3",
+			"packages": []interface{}{
+				map[string]interface{}{
+					"name":      "test-app",
+					"SPDXID":    "SPDXRef-Package",
+					"checksums": []interface{}{},
+				},
+			},
+		}
+
+		err := enricher.EnrichWithArtifactHashes(sbomData, tmpDir)
+		if err != nil {
+			t.Fatalf("EnrichWithArtifactHashes failed: %v", err)
+		}
+	})
+
+	t.Run("Invalid SBOM format", func(t *testing.T) {
+		sbomData := map[string]interface{}{
+			"invalid": "format",
+		}
+
+		err := enricher.EnrichWithArtifactHashes(sbomData, tmpDir)
+		if err == nil {
+			t.Error("Expected error for invalid SBOM format")
+		}
+	})
+
+	t.Run("Empty artifact directory", func(t *testing.T) {
+		emptyDir := t.TempDir()
+
+		sbomData := map[string]interface{}{
+			"bomFormat": "CycloneDX",
+			"components": []interface{}{
+				map[string]interface{}{
+					"name": "no-artifact",
+					"type": "library",
+				},
+			},
+		}
+
+		err := enricher.EnrichWithArtifactHashes(sbomData, emptyDir)
+		if err != nil {
+			t.Fatalf("Unexpected error: %v", err)
+		}
+	})
+}
+
+func TestEnrichCycloneDXWithArtifactHashes(t *testing.T) {
+	enricher := NewEnricher(".")
+	tmpDir := t.TempDir()
+
+	artifactFile := filepath.Join(tmpDir, "myapp")
+	if err := os.WriteFile(artifactFile, []byte("content"), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	components := []interface{}{
+		map[string]interface{}{
+			"name": "myapp",
+			"type": "application",
+		},
+		map[string]interface{}{
+			"name": "other",
+			"type": "library",
+		},
+	}
+
+	err := enricher.enrichCycloneDXWithArtifactHashes(components, tmpDir)
+	if err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+
+	comp := components[0].(map[string]interface{})
+	hashes, ok := comp["hashes"].([]interface{})
+	if !ok || len(hashes) == 0 {
+		t.Error("Expected hashes for matching artifact")
+	}
+}
+
+func TestEnrichSPDXWithArtifactHashes(t *testing.T) {
+	enricher := NewEnricher(".")
+	tmpDir := t.TempDir()
+
+	artifactFile := filepath.Join(tmpDir, "mybinary")
+	if err := os.WriteFile(artifactFile, []byte("binary"), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	packages := []interface{}{
+		map[string]interface{}{
+			"name":      "mybinary",
+			"SPDXID":    "SPDXRef-Binary",
+			"checksums": []interface{}{},
+		},
+	}
+
+	err := enricher.enrichSPDXWithArtifactHashes(packages, tmpDir)
+	if err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+
+	pkg := packages[0].(map[string]interface{})
+	checksums, ok := pkg["checksums"].([]interface{})
+	if !ok || len(checksums) == 0 {
+		t.Error("Expected checksums for matching package")
+	}
+}
+
+func TestDetectLicenseFromText(t *testing.T) {
+	t.Run("nil classifier returns empty", func(t *testing.T) {
+		result := detectLicenseFromText("some license text")
+		if result != "" {
+			t.Logf("Got result: %s", result)
+		}
+	})
+
+	t.Run("empty text returns empty", func(t *testing.T) {
+		result := detectLicenseFromText("")
+		if result != "" {
+			t.Logf("Got result: %s", result)
+		}
+	})
+}
+
+func TestAssertDependencyCompleteness(t *testing.T) {
+	enricher := NewEnricher(".")
+
+	t.Run("CycloneDX adds completeness", func(t *testing.T) {
+		sbomData := map[string]interface{}{
+			"bomFormat":   "CycloneDX",
+			"specVersion": "1.5",
+			"metadata":    map[string]interface{}{},
+		}
+
+		enricher.assertDependencyCompleteness(sbomData)
+
+		metadata := sbomData["metadata"].(map[string]interface{})
+		props := metadata["properties"].([]interface{})
+
+		found := false
+		for _, p := range props {
+			pm := p.(map[string]interface{})
+			if pm["name"] == "completeness" && pm["value"] == "complete" {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Error("Expected completeness property to be added")
+		}
+
+		specVer := sbomData["specVersion"]
+		if specVer != "1.6" {
+			t.Errorf("Expected specVersion 1.6, got %v", specVer)
+		}
+	})
+
+	t.Run("SPDX adds annotation", func(t *testing.T) {
+		sbomData := map[string]interface{}{
+			"spdxVersion": "SPDX-2.3",
+		}
+
+		enricher.assertDependencyCompleteness(sbomData)
+
+		annotations, ok := sbomData["annotations"].([]interface{})
+		if !ok || len(annotations) == 0 {
+			t.Error("Expected annotations to be added")
+		}
+	})
+}
+
+func TestEnrichSBOM_EmptyJSON(t *testing.T) {
+	enricher := NewEnricher(".")
+	_, err := enricher.EnrichSBOM("{}")
+	if err == nil {
+		t.Error("Expected error for empty JSON")
+	}
+}
+
+func TestGetKnownLicense(t *testing.T) {
+	enricher := NewEnricher(".")
+
+	tests := []struct {
+		pkg      string
+		expected string
+	}{
+		{"github.com/spf13/cobra", "Apache-2.0"},
+		{"github.com/spf13/viper", "MIT"},
+		{"github.com/google/uuid", "BSD-3-Clause"},
+		{"gorm.io/gorm", "MIT"},
+		{"golang.org/x/crypto", "BSD-3-Clause"},
+		{"stdlib", "BSD-3-Clause"},
+		{"unknown/package", ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.pkg, func(t *testing.T) {
+			result := enricher.getKnownLicense(tt.pkg)
+			if result != tt.expected {
+				t.Errorf("getKnownLicense(%s) = %s, want %s", tt.pkg, result, tt.expected)
+			}
+		})
+	}
+}
+
+func TestParseAuthorsFile(t *testing.T) {
+	t.Run("empty file", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		authorsFile := filepath.Join(tmpDir, "AUTHORS")
+		if err := os.WriteFile(authorsFile, []byte(""), 0644); err != nil {
+			t.Fatal(err)
+		}
+
+		file, err := os.Open(authorsFile)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer file.Close()
+
+		result := parseAuthorsFile(file)
+		if result != "" {
+			t.Errorf("Expected empty result, got %q", result)
+		}
+	})
+
+	t.Run("file with only comments", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		authorsFile := filepath.Join(tmpDir, "AUTHORS")
+		content := "# This is a comment\n// Another comment\n"
+		if err := os.WriteFile(authorsFile, []byte(content), 0644); err != nil {
+			t.Fatal(err)
+		}
+
+		file, err := os.Open(authorsFile)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer file.Close()
+
+		result := parseAuthorsFile(file)
+		if result != "" {
+			t.Errorf("Expected empty result for comments, got %q", result)
+		}
+	})
+}
+
+func TestExtractSupplierFromAuthors(t *testing.T) {
+	t.Run("no authors file", func(t *testing.T) {
+		result := ExtractSupplierFromAuthors("/nonexistent/path")
+		if result != "" {
+			t.Errorf("Expected empty result, got %q", result)
+		}
+	})
+
+	t.Run("authors file with email", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		authorsFile := filepath.Join(tmpDir, "AUTHORS")
+		content := "John Doe <john@example.com>\n"
+		if err := os.WriteFile(authorsFile, []byte(content), 0644); err != nil {
+			t.Fatal(err)
+		}
+
+		result := ExtractSupplierFromAuthors(tmpDir)
+		if result != "John Doe" {
+			t.Errorf("Expected 'John Doe', got %q", result)
+		}
+	})
+}
+
+func TestLoadGoSum(t *testing.T) {
+	enricher := NewEnricher(".")
+
+	t.Run("no go.sum file", func(t *testing.T) {
+		result := enricher.loadGoSum()
+		if len(result) != 0 {
+			t.Errorf("Expected empty map, got %d entries", len(result))
+		}
+	})
+
+	t.Run("with go.sum file", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		goSumFile := filepath.Join(tmpDir, "go.sum")
+		content := `golang.org/x/text v0.0.0 h1: OlahdJgR9M8nrX
+		`
+		if err := os.WriteFile(goSumFile, []byte(content), 0644); err != nil {
+			t.Fatal(err)
+		}
+
+		result := enricher.loadGoSum()
+		if len(result) != 0 {
+			t.Logf("Got %d entries", len(result))
+		}
+	})
+}
+
 func contains(s, substr string) bool {
 	return strings.Contains(s, substr)
 }

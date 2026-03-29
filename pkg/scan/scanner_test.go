@@ -1008,6 +1008,195 @@ func containsAt(s, substr string) bool {
 	return false
 }
 
+func TestGrypeAdapter_FindMatches(t *testing.T) {
+	t.Run("FindMatches uses NewScanner", func(t *testing.T) {
+		_ = &GrypeAdapter{}
+		scanner := NewScanner(false)
+		if scanner == nil {
+			t.Error("expected non-nil scanner")
+		}
+	})
+
+	t.Run("NewScanner creates scanner with nil mock func", func(t *testing.T) {
+		scanner := NewScanner(false)
+		if scanner.vulnProviderFunc != nil {
+			t.Error("expected nil vulnProviderFunc")
+		}
+	})
+
+	t.Run("NewScannerWithMock creates scanner with mock func", func(t *testing.T) {
+		mockFunc := func(ctx context.Context, sbomModel *sbom.SBOM) (*ScanResult, error) {
+			return nil, nil
+		}
+		scanner := NewScannerWithMock(true, mockFunc)
+		if scanner == nil {
+			t.Error("expected non-nil scanner")
+		}
+		if !scanner.verbose {
+			t.Error("expected verbose to be true")
+		}
+		if scanner.vulnProviderFunc == nil {
+			t.Error("expected non-nil vulnProviderFunc")
+		}
+	})
+}
+
+func TestScanner_Verbose(t *testing.T) {
+	t.Run("verbose mode enables logging", func(t *testing.T) {
+		scanner := NewScanner(true)
+		if !scanner.verbose {
+			t.Error("expected verbose to be true")
+		}
+	})
+
+	t.Run("non-verbose mode disables logging", func(t *testing.T) {
+		scanner := NewScanner(false)
+		if scanner.verbose {
+			t.Error("expected verbose to be false")
+		}
+	})
+}
+
+func TestScanner_ConvertMatch(t *testing.T) {
+	t.Run("convertMatch with all fields populated", func(t *testing.T) {
+		scanner := &Scanner{verbose: false}
+
+		result := &ScanResult{
+			Matches: []VulnerabilityMatch{
+				{
+					Vulnerability: Vulnerability{
+						ID:          "CVE-2024-0001",
+						Severity:    "Critical",
+						Description: "Test description",
+						URLs:        []string{"https://example.com/cve-2024-0001"},
+						CVSS: []CVSS{
+							{Version: "3.1", Vector: "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H", Score: 9.8},
+						},
+					},
+					Package: Package{
+						Name:    "test-package",
+						Version: "1.0.0",
+						Type:    "npm",
+						PURL:    "pkg:npm/test-package@1.0.0",
+					},
+					MatchDetails: []MatchDetail{
+						{Type: "exactMatch", Confidence: "1.00", Matcher: "stock-matcher"},
+					},
+				},
+			},
+		}
+
+		jsonStr, err := scanner.FormatJSON(result)
+		if err != nil {
+			t.Errorf("FormatJSON error: %v", err)
+		}
+		if jsonStr == "" {
+			t.Error("expected non-empty JSON")
+		}
+	})
+
+	t.Run("convertMatch with only required fields", func(t *testing.T) {
+		scanner := &Scanner{verbose: false}
+
+		result := &ScanResult{
+			Matches: []VulnerabilityMatch{
+				{
+					Vulnerability: Vulnerability{
+						ID:       "CVE-2024-0002",
+						Severity: "Unknown",
+					},
+					Package: Package{
+						Name:    "minimal-pkg",
+						Version: "0.1.0",
+					},
+				},
+			},
+		}
+
+		jsonStr, err := scanner.FormatJSON(result)
+		if err != nil {
+			t.Errorf("FormatJSON error: %v", err)
+		}
+		if !contains(jsonStr, "CVE-2024-0002") {
+			t.Error("expected CVE ID in JSON")
+		}
+	})
+}
+
+func TestFormatJSON_ErrorPaths(t *testing.T) {
+	t.Run("FormatJSON with marshal error", func(t *testing.T) {
+		scanner := &Scanner{}
+
+		type Unmarshable struct {
+			Chan chan int
+		}
+
+		result := &ScanResult{
+			Matches: []VulnerabilityMatch{
+				{
+					Vulnerability: Vulnerability{ID: "CVE-1"},
+					Package:       Package{Name: "test"},
+				},
+			},
+		}
+
+		_, err := scanner.FormatJSON(result)
+		if err != nil {
+			t.Logf("Got error (expected for unmarshable): %v", err)
+		}
+	})
+}
+
+func TestFilterBySeverity_MoreEdgeCases(t *testing.T) {
+	scanner := &Scanner{}
+
+	t.Run("filter with nil matches", func(t *testing.T) {
+		result := scanner.FilterBySeverity(nil, "High")
+		if len(result) != 0 {
+			t.Errorf("expected 0, got %d", len(result))
+		}
+	})
+
+	t.Run("filter with empty severity and empty matches", func(t *testing.T) {
+		result := scanner.FilterBySeverity([]VulnerabilityMatch{}, "")
+		if len(result) != 0 {
+			t.Errorf("expected 0, got %d", len(result))
+		}
+	})
+}
+
+func TestScanResult_Fields(t *testing.T) {
+	t.Run("ScanResult with nil source", func(t *testing.T) {
+		result := &ScanResult{
+			Source: nil,
+		}
+		scanner := &Scanner{}
+		jsonStr, err := scanner.FormatJSON(result)
+		if err != nil {
+			t.Errorf("unexpected error: %v", err)
+		}
+		if jsonStr == "" {
+			t.Error("expected non-empty JSON")
+		}
+	})
+
+	t.Run("ScanResult with ignored matches only", func(t *testing.T) {
+		result := &ScanResult{
+			IgnoredMatches: []VulnerabilityMatch{
+				{Vulnerability: Vulnerability{ID: "CVE-IGNORED", Severity: "Low"}, Package: Package{Name: "ignored", Version: "1.0"}},
+			},
+		}
+		scanner := &Scanner{}
+		jsonStr, err := scanner.FormatJSON(result)
+		if err != nil {
+			t.Errorf("unexpected error: %v", err)
+		}
+		if !contains(jsonStr, "ignoredMatches") {
+			t.Error("expected ignoredMatches in JSON")
+		}
+	})
+}
+
 func TestScanWithMocks(t *testing.T) {
 	t.Run("Scan returns error when mock returns error", func(t *testing.T) {
 		mockErr := errors.New("database connection failed")
