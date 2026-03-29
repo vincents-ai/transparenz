@@ -1,6 +1,7 @@
 package models
 
 import (
+	"errors"
 	"time"
 
 	"github.com/google/uuid"
@@ -39,4 +40,22 @@ func (s *SBOM) BeforeCreate(tx *gorm.DB) error {
 		s.ID = uuid.New()
 	}
 	return nil
+}
+
+func (s *SBOM) Validate() error {
+	if s.Name == "" {
+		return errors.New("SBOM name is required")
+	}
+	if s.Format != "SPDX" && s.Format != "CycloneDX" {
+		return errors.New("invalid SBOM format")
+	}
+	return nil
+}
+
+func (s *SBOM) IsSPDX() bool {
+	return s.Format == "SPDX"
+}
+
+func (s *SBOM) IsCycloneDX() bool {
+	return s.Format == "CycloneDX"
 }

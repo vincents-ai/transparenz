@@ -43,3 +43,15 @@ func (s *Scan) BeforeCreate(tx *gorm.DB) error {
 	}
 	return nil
 }
+
+func (s *Scan) HasVulnerabilities() bool {
+	return s.TotalVulnerabilities > 0
+}
+
+func (s *Scan) GetTotalSeverityCount() int {
+	return s.CriticalCount + s.HighCount + s.MediumCount + s.LowCount
+}
+
+func (s *Scan) HasCriticalVulnerabilities() bool {
+	return s.CriticalCount > 0
+}

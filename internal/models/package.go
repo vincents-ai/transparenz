@@ -1,6 +1,7 @@
 package models
 
 import (
+	"errors"
 	"time"
 
 	"github.com/google/uuid"
@@ -43,4 +44,15 @@ func (p *Package) BeforeCreate(tx *gorm.DB) error {
 		p.ID = uuid.New()
 	}
 	return nil
+}
+
+func (p *Package) Validate() error {
+	if p.Name == "" {
+		return errors.New("package name is required")
+	}
+	return nil
+}
+
+func (p *Package) HasPURL() bool {
+	return p.PURL != nil && *p.PURL != ""
 }
