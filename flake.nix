@@ -91,6 +91,34 @@
             echo "  transparenz bsi-check <sbom>"
           '';
         };
+
+        hydraJobs.tests = {
+          # CLI integration tests
+          transparenz-go-cli = import ./nix/tests/transparenz-go-test.nix { system = system; };
+          
+          # Database integration tests (PostgreSQL)
+          transparenz-go-database = import ./nix/tests/database-integration.nix { system = system; };
+          
+          # BSI TR-03183-2 compliance tests
+          transparenz-go-bsi-compliance = import ./nix/tests/bsi-compliance.nix { system = system; };
+          
+          # Vulnerability database sync tests
+          transparenz-go-vulnz = import ./nix/tests/vulnz-integration.nix { system = system; };
+          
+          # End-to-end tests
+          transparenz-go-e2e = import ./nix/tests/e2e-test.nix { system = system; };
+          
+          # Quick smoke test
+          sbom-generation = pkgs.runCommand "sbom-generation-test" {
+            nativeBuildInputs = [ pkgs.transparenz-go pkgs.jq ];
+          } ''
+            mkdir -p $out
+            transparenz --help | grep -q "SBOM generator"
+            transparenz version | grep -q "0.1.0"
+            transparenz generate --help | grep -q "Generate SBOM"
+            touch $out/success
+          '';
+        };
       }
     );
 }
