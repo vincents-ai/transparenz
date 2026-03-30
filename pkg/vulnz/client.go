@@ -36,20 +36,20 @@ type Metadata struct {
 }
 
 type Vulnerability struct {
-	ID               int64           `json:"id"`
-	Provider         string          `json:"provider"`
-	VulnID           string          `json:"vuln_id"`
-	CVE              sql.NullString  `json:"cve"`
-	EuvdID           sql.NullString  `json:"euvd_id"`
-	Title            sql.NullString  `json:"title"`
-	Description      sql.NullString  `json:"description"`
-	Severity         sql.NullString  `json:"severity"`
-	CvssScore        sql.NullFloat64 `json:"cvss_score"`
-	CvssVector       sql.NullString  `json:"cvss_vector"`
-	PublishedDate    sql.NullString  `json:"published_date"`
-	ModifiedDate     sql.NullString  `json:"modified_date"`
-	IsKnownExploited bool            `json:"is_known_exploited"`
-	RawData          string          `json:"raw_data"`
+	ID               int64   `json:"id"`
+	Provider         string  `json:"provider"`
+	VulnID           string  `json:"vuln_id"`
+	CVE              string  `json:"cve,omitempty"`
+	EuvdID           string  `json:"euvd_id,omitempty"`
+	Title            string  `json:"title,omitempty"`
+	Description      string  `json:"description,omitempty"`
+	Severity         string  `json:"severity,omitempty"`
+	CvssScore        float64 `json:"cvss_score,omitempty"`
+	CvssVector       string  `json:"cvss_vector,omitempty"`
+	PublishedDate    string  `json:"published_date,omitempty"`
+	ModifiedDate     string  `json:"modified_date,omitempty"`
+	IsKnownExploited bool    `json:"is_known_exploited"`
+	RawData          string  `json:"raw_data,omitempty"`
 }
 
 func NewClient(config Config) *Client {
@@ -125,39 +125,29 @@ func (c *Client) GetMetadata(dbPath string) (*Metadata, error) {
 	}
 	defer db.Close()
 
-	var meta Metadata
-	var lastUpdate, providersJSON string
-	var vulnCount int
+	meta := &Metadata{}
 
-	err = db.QueryRow(`
-		SELECT value FROM metadata WHERE key = 'last_updated'
-	`).Scan(&lastUpdate)
-	if err != nil && err != sql.ErrNoRows {
-		return nil, fmt.Errorf("failed to get last_updated: %w", err)
-	}
-
-	if lastUpdate != "" {
+	row := db.QueryRow(`SELECT value FROM metadata WHERE key = 'last_updated'`)
+	var lastUpdate string
+	if err := row.Scan(&lastUpdate); err == nil && lastUpdate != "" {
 		meta.LastUpdate, _ = time.Parse(time.RFC3339, lastUpdate)
 	}
 
-	err = db.QueryRow(`
-		SELECT value FROM metadata WHERE key = 'providers'
-	`).Scan(&providersJSON)
-	if err != nil && err != sql.ErrNoRows {
-		return nil, fmt.Errorf("failed to get providers: %w", err)
-	}
-
-	if providersJSON != "" {
+	row = db.QueryRow(`SELECT value FROM metadata WHERE key = 'providers'`)
+	var providersJSON string
+	if err := row.Scan(&providersJSON); err == nil && providersJSON != "" {
 		json.Unmarshal([]byte(providersJSON), &meta.Providers)
 	}
 
-	err = db.QueryRow(`SELECT COUNT(*) FROM vulnerabilities`).Scan(&vulnCount)
-	if err != nil {
+	row = db.QueryRow(`SELECT value FROM metadata WHERE key = 'version'`)
+	row.Scan(&meta.Version)
+
+	row = db.QueryRow(`SELECT COUNT(*) FROM vulnerabilities`)
+	if err := row.Scan(&meta.VulnCount); err != nil {
 		return nil, fmt.Errorf("failed to count vulnerabilities: %w", err)
 	}
-	meta.VulnCount = vulnCount
 
-	return &meta, nil
+	return meta, nil
 }
 
 func (c *Client) Query(dbPath string, query string) ([]map[string]interface{}, error) {
