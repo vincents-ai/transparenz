@@ -8,7 +8,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/deutschland-stack/transparenz/pkg/bsi"
+	"github.com/shift/transparenz/pkg/bsi"
 )
 
 var (

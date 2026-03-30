@@ -5,12 +5,14 @@ import (
 	"fmt"
 	"os"
 	"text/tabwriter"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/spf13/cobra"
 
-	"github.com/deutschland-stack/transparenz/internal/repository"
-	"github.com/deutschland-stack/transparenz/pkg/database"
+	"github.com/shift/transparenz/internal/repository"
+	"github.com/shift/transparenz/pkg/database"
+	"github.com/shift/transparenz/pkg/vulnz"
 )
 
 var dbCmd = &cobra.Command{

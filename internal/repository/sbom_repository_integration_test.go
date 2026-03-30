@@ -15,7 +15,7 @@ import (
 	gormpostgres "gorm.io/driver/postgres"
 	"gorm.io/gorm"
 
-	"github.com/deutschland-stack/transparenz/internal/models"
+	"github.com/shift/transparenz/internal/models"
 )
 
 func TestSaveSBOM_WithRealPostgreSQL(t *testing.T) {

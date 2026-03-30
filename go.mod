@@ -1,4 +1,4 @@
-module github.com/deutschland-stack/transparenz
+module github.com/shift/transparenz
 
 go 1.25.8
 
@@ -9,6 +9,7 @@ require (
 	github.com/cucumber/godog v0.15.1
 	github.com/google/licenseclassifier/v2 v2.0.0
 	github.com/google/uuid v1.6.0
+	github.com/mattn/go-sqlite3 v1.14.23
 	github.com/spf13/cobra v1.10.2
 	github.com/stretchr/testify v1.11.1
 	github.com/testcontainers/testcontainers-go/modules/postgres v0.41.0

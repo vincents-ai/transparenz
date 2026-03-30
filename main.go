@@ -1,6 +1,6 @@
 package main
 
-import "github.com/deutschland-stack/transparenz/cmd"
+import "github.com/shift/transparenz/cmd"
 
 func main() {
 	cmd.Execute()

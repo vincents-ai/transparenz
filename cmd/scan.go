@@ -7,10 +7,10 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/deutschland-stack/transparenz/internal/repository"
-	"github.com/deutschland-stack/transparenz/pkg/database"
-	"github.com/deutschland-stack/transparenz/pkg/sbom"
-	"github.com/deutschland-stack/transparenz/pkg/scan"
+	"github.com/shift/transparenz/internal/repository"
+	"github.com/shift/transparenz/pkg/database"
+	"github.com/shift/transparenz/pkg/sbom"
+	"github.com/shift/transparenz/pkg/scan"
 )
 
 var (
