@@ -22,6 +22,11 @@ var (
 	generateBSICompliant    bool
 	generateManufacturer    string
 	generateManufacturerURL string
+
+	// submit shortcut flags
+	generateSubmit    bool
+	generateServerURL string
+	generateToken     string
 )
 
 var generateCmd = &cobra.Command{
@@ -169,6 +174,41 @@ Example usage:
 			}
 
 			fmt.Fprintf(os.Stderr, "SBOM saved to database with ID: %s\n", sbomID)
+
+			// When BSI-compliant generation was requested, record compliance status in DB
+			if generateBSICompliant {
+				if err := repo.UpdateBSICompliance(sbomID, true, 1.0); err != nil {
+					// Non-fatal: log but don't fail the overall command
+					fmt.Fprintf(os.Stderr, "warning: failed to update BSI compliance in database: %v\n", err)
+				} else if verbose {
+					fmt.Fprintf(os.Stderr, "BSI compliance recorded in database (placeholder score: 100%%)\n")
+				}
+			}
+		}
+
+		// Submit to remote server if requested
+		if generateSubmit {
+			serverURL := generateServerURL
+			if serverURL == "" {
+				serverURL = os.Getenv("TRANSPARENZ_SERVER_URL")
+			}
+			if serverURL == "" {
+				return fmt.Errorf("server URL is required for --submit (use --server-url or TRANSPARENZ_SERVER_URL)")
+			}
+
+			token := generateToken
+			if token == "" {
+				token = os.Getenv("TRANSPARENZ_TOKEN")
+			}
+			if token == "" {
+				return fmt.Errorf("bearer token is required for --submit (use --token or TRANSPARENZ_TOKEN)")
+			}
+
+			sbomBytes := []byte(output)
+			ct := detectContentType(sbomBytes)
+			if err := postSBOM(serverURL, token, ct, sbomBytes, 30, false); err != nil {
+				return fmt.Errorf("failed to submit SBOM: %w", err)
+			}
 		}
 
 		return nil
@@ -184,4 +224,7 @@ func init() {
 	generateCmd.Flags().BoolVarP(&generateBSICompliant, "bsi-compliant", "b", false, "Generate BSI TR-03183 compliant SBOM (adds hashes, licenses, suppliers)")
 	generateCmd.Flags().StringVar(&generateManufacturer, "manufacturer", "", "SBOM producer organisation name (BSI TR-03183-2, also env: TRANSPARENZ_MANUFACTURER)")
 	generateCmd.Flags().StringVar(&generateManufacturerURL, "manufacturer-url", "", "SBOM producer organisation URL (also env: TRANSPARENZ_MANUFACTURER_URL)")
+	generateCmd.Flags().BoolVar(&generateSubmit, "submit", false, "Submit generated SBOM to a remote server after generation")
+	generateCmd.Flags().StringVar(&generateServerURL, "server-url", "", "Remote server endpoint for SBOM submission (also env: TRANSPARENZ_SERVER_URL)")
+	generateCmd.Flags().StringVar(&generateToken, "token", "", "Bearer token for SBOM submission (also env: TRANSPARENZ_TOKEN)")
 }

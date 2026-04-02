@@ -21,6 +21,9 @@ type SBOM struct {
 	SourcePath        *string        `gorm:"type:text" json:"source_path,omitempty"`
 	SBOMJson          JSONB          `gorm:"type:jsonb;not null" json:"sbom_json"`
 	GeneratedAt       *time.Time     `gorm:"index" json:"generated_at,omitempty"`
+	BSICompliant      bool           `gorm:"default:false" json:"bsi_compliant"`
+	BSIScore          float64        `gorm:"default:0" json:"bsi_score"`
+	BSICheckedAt      *time.Time     `json:"bsi_checked_at,omitempty"`
 	CreatedAt         time.Time      `gorm:"not null;default:now();index:idx_sboms_created_at" json:"created_at"`
 	UpdatedAt         time.Time      `gorm:"not null;default:now()" json:"updated_at"`
 	DeletedAt         gorm.DeletedAt `gorm:"index" json:"-"`

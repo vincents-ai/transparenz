@@ -458,6 +458,16 @@ func (r *SBOMRepository) GetVulnerabilities(ctx context.Context, sbomID uuid.UUI
 	return vulnerabilities, nil
 }
 
+// UpdateBSICompliance updates the BSI compliance status and score for an SBOM
+func (r *SBOMRepository) UpdateBSICompliance(id uuid.UUID, compliant bool, score float64) error {
+	now := time.Now()
+	return r.db.Model(&models.SBOM{}).Where("id = ?", id).Updates(map[string]interface{}{
+		"bsi_compliant":  compliant,
+		"bsi_score":      score,
+		"bsi_checked_at": now,
+	}).Error
+}
+
 // SearchByPackage searches for packages by name across all SBOMs
 func (r *SBOMRepository) SearchByPackage(ctx context.Context, packageName string) ([]models.Package, error) {
 	var packages []models.Package
