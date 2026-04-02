@@ -33,6 +33,8 @@ func Execute() {
 }
 
 func init() {
+	// TODO: implement config file loading (e.g. using github.com/spf13/viper)
+	// cfgFile is currently unused.
 	rootCmd.PersistentFlags().StringVarP(&cfgFile, "config", "c", "", "Config file (default is $HOME/.transparenz.yaml)")
 	rootCmd.PersistentFlags().BoolVarP(&verbose, "verbose", "v", false, "Enable verbose output")
 }

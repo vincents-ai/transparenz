@@ -28,6 +28,8 @@ var (
 	generateSubmit    bool
 	generateServerURL string
 	generateToken     string
+	generateInsecure  bool
+	generateTimeout   int
 )
 
 var generateCmd = &cobra.Command{
@@ -199,11 +201,16 @@ Example usage:
 
 			// When BSI-compliant generation was requested, record compliance status in DB
 			if generateBSICompliant {
-				if err := repo.UpdateBSICompliance(sbomID, true, 1.0); err != nil {
+				compliant, score, checkErr := RunBSICheck(output)
+				if checkErr != nil {
+					fmt.Fprintf(os.Stderr, "warning: could not compute BSI score: %v\n", checkErr)
+					compliant, score = false, 0.0
+				}
+				if err := repo.UpdateBSICompliance(sbomID, compliant, score); err != nil {
 					// Non-fatal: log but don't fail the overall command
-					fmt.Fprintf(os.Stderr, "warning: failed to update BSI compliance in database: %v\n", err)
+					fmt.Fprintf(os.Stderr, "warning: could not update BSI compliance in DB: %v\n", err)
 				} else if verbose {
-					fmt.Fprintf(os.Stderr, "BSI compliance recorded in database (placeholder score: 100%%)\n")
+					fmt.Fprintf(os.Stderr, "BSI compliance recorded in database (score: %.1f%%)\n", score*100)
 				}
 			}
 		}
@@ -226,9 +233,14 @@ Example usage:
 				return fmt.Errorf("bearer token is required for --submit (use --token or TRANSPARENZ_TOKEN)")
 			}
 
+			insecure := generateInsecure
+			if !insecure && os.Getenv("TRANSPARENZ_INSECURE") == "true" {
+				insecure = true
+			}
+
 			sbomBytes := []byte(output)
 			ct := detectContentType(sbomBytes)
-			if err := postSBOM(serverURL, token, ct, sbomBytes, 30, false); err != nil {
+			if err := postSBOM(serverURL, token, ct, sbomBytes, generateTimeout, insecure); err != nil {
 				return fmt.Errorf("failed to submit SBOM: %w", err)
 			}
 		}
@@ -250,4 +262,6 @@ func init() {
 	generateCmd.Flags().BoolVar(&generateSubmit, "submit", false, "Submit generated SBOM to a remote server after generation")
 	generateCmd.Flags().StringVar(&generateServerURL, "server-url", "", "Remote server endpoint for SBOM submission (also env: TRANSPARENZ_SERVER_URL)")
 	generateCmd.Flags().StringVar(&generateToken, "token", "", "Bearer token for SBOM submission (also env: TRANSPARENZ_TOKEN)")
+	generateCmd.Flags().BoolVar(&generateInsecure, "insecure", false, "Skip TLS certificate verification for submission (also env: TRANSPARENZ_INSECURE=true)")
+	generateCmd.Flags().IntVar(&generateTimeout, "timeout", 30, "HTTP timeout in seconds for SBOM submission")
 }

@@ -2,6 +2,8 @@ package cmd
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 
@@ -117,9 +119,47 @@ Example usage:
 			}
 			defer database.Close(db)
 
-			// TODO: Implement SaveScanResults method
-			_ = repository.NewSBOMRepository(db)
-			fmt.Fprintf(os.Stderr, "Warning: Database save not yet implemented for scan results\n")
+			// Extract document namespace from raw SBOM bytes.
+			// Mirror the detection logic used in repository.SaveSBOM.
+			var namespace string
+			var probe struct {
+				SPDXVersion       string `json:"spdxVersion"`
+				DocumentNamespace string `json:"documentNamespace"`
+				BomFormat         string `json:"bomFormat"`
+				SerialNumber      string `json:"serialNumber"`
+			}
+			if jsonErr := json.Unmarshal(sbomData, &probe); jsonErr == nil {
+				if probe.SPDXVersion != "" {
+					namespace = probe.DocumentNamespace
+				} else if probe.BomFormat == "CycloneDX" {
+					namespace = probe.SerialNumber
+				}
+			}
+
+			if namespace == "" {
+				fmt.Fprintf(os.Stderr, "warning: could not determine SBOM namespace, scan results not persisted\n")
+			} else {
+				repo := repository.NewSBOMRepository(db)
+				existingSBOM, lookupErr := repo.GetSBOMByNamespace(namespace)
+				if lookupErr != nil {
+					if errors.Is(lookupErr, repository.ErrSBOMNotFound) {
+						fmt.Fprintf(os.Stderr, "warning: SBOM not found in database (run generate --save first), scan results not persisted\n")
+					} else {
+						return fmt.Errorf("failed to look up SBOM in database: %w", lookupErr)
+					}
+				} else {
+					// Always produce JSON for storage regardless of output format
+					scanJSON, jsonErr := scanner.FormatJSON(result)
+					if jsonErr != nil {
+						return fmt.Errorf("failed to serialise scan results for storage: %w", jsonErr)
+					}
+					scanID, saveErr := repo.SaveScanResults(context.Background(), existingSBOM.ID, scanJSON)
+					if saveErr != nil {
+						return fmt.Errorf("failed to save scan results to database: %w", saveErr)
+					}
+					fmt.Fprintf(os.Stderr, "Scan results saved to database with ID: %s\n", scanID)
+				}
+			}
 		}
 
 		return nil

@@ -17,6 +17,13 @@ var (
 	enrichBinary          string
 	enrichManufacturer    string
 	enrichManufacturerURL string
+
+	// submit shortcut flags
+	enrichSubmit    bool
+	enrichServerURL string
+	enrichToken     string
+	enrichInsecure  bool
+	enrichTimeout   int
 )
 
 var enrichCmd = &cobra.Command{
@@ -172,6 +179,37 @@ Example usage:
 			fmt.Println(outputStr)
 		}
 
+		// Submit to remote server if requested
+		if enrichSubmit {
+			serverURL := enrichServerURL
+			if serverURL == "" {
+				serverURL = os.Getenv("TRANSPARENZ_SERVER_URL")
+			}
+			if serverURL == "" {
+				return fmt.Errorf("server URL is required for --submit (use --server-url or TRANSPARENZ_SERVER_URL)")
+			}
+
+			token := enrichToken
+			if token == "" {
+				token = os.Getenv("TRANSPARENZ_TOKEN")
+			}
+			if token == "" {
+				return fmt.Errorf("bearer token is required for --submit (use --token or TRANSPARENZ_TOKEN)")
+			}
+
+			insecure := enrichInsecure
+			if !insecure && os.Getenv("TRANSPARENZ_INSECURE") == "true" {
+				insecure = true
+			}
+
+			sbomBytes := []byte(outputStr)
+			ct := detectContentType(sbomBytes)
+			if err := postSBOM(serverURL, token, ct, sbomBytes, enrichTimeout, insecure); err != nil {
+				return fmt.Errorf("failed to submit enriched SBOM: %w", err)
+			}
+			fmt.Fprintf(os.Stderr, "Submitted enriched SBOM to %s\n", serverURL)
+		}
+
 		// Print summary
 		fmt.Fprintf(os.Stderr, "\n=== BSI TR-03183-2 Enrichment Summary ===\n")
 		fmt.Fprintf(os.Stderr, "Format: %s\n", format)
@@ -200,4 +238,9 @@ func init() {
 	enrichCmd.Flags().StringVar(&enrichBinary, "binary", "", "Path to a single compiled binary for SHA-512 hash injection (BSI TR-03183-2 §4.3)")
 	enrichCmd.Flags().StringVar(&enrichManufacturer, "manufacturer", "", "SBOM producer organisation name (BSI TR-03183-2, also env: TRANSPARENZ_MANUFACTURER)")
 	enrichCmd.Flags().StringVar(&enrichManufacturerURL, "manufacturer-url", "", "SBOM producer organisation URL (also env: TRANSPARENZ_MANUFACTURER_URL)")
+	enrichCmd.Flags().BoolVar(&enrichSubmit, "submit", false, "Submit enriched SBOM to a remote server after enrichment")
+	enrichCmd.Flags().StringVar(&enrichServerURL, "server-url", "", "Remote server endpoint for SBOM submission (also env: TRANSPARENZ_SERVER_URL)")
+	enrichCmd.Flags().StringVar(&enrichToken, "token", "", "Bearer token for SBOM submission (also env: TRANSPARENZ_TOKEN)")
+	enrichCmd.Flags().BoolVar(&enrichInsecure, "insecure", false, "Skip TLS certificate verification for submission (also env: TRANSPARENZ_INSECURE=true)")
+	enrichCmd.Flags().IntVar(&enrichTimeout, "timeout", 30, "HTTP timeout in seconds for SBOM submission")
 }
