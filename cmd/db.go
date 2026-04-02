@@ -4,17 +4,13 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"path/filepath"
-	"strings"
 	"text/tabwriter"
-	"time"
 
 	"github.com/google/uuid"
 	"github.com/spf13/cobra"
 
 	"github.com/shift/transparenz/internal/repository"
 	"github.com/shift/transparenz/pkg/database"
-	"github.com/shift/transparenz/pkg/vulnz"
 )
 
 var dbCmd = &cobra.Command{
@@ -227,136 +223,9 @@ var deleteCmd = &cobra.Command{
 	},
 }
 
-var dbSyncCmd = &cobra.Command{
-	Use:   "sync",
-	Short: "Sync vulnerability database from vulnz",
-	Long:  `Download and merge the latest vulnerability database from the vulnz service.`,
-	RunE: func(cmd *cobra.Command, args []string) error {
-		token, _ := cmd.Flags().GetString("token")
-		projectID, _ := cmd.Flags().GetString("project-id")
-		apiURL, _ := cmd.Flags().GetString("api-url")
-		outputPath, _ := cmd.Flags().GetString("output")
-
-		if token == "" {
-			token = os.Getenv("VULNZ_TOKEN")
-		}
-		if projectID == "" {
-			projectID = os.Getenv("VULNZ_PROJECT_ID")
-		}
-		if apiURL == "" {
-			apiURL = "https://gitlab.opencode.de"
-		}
-		if outputPath == "" {
-			outputPath = "vulnerabilities.db"
-		}
-
-		if token == "" || projectID == "" {
-			return fmt.Errorf("token and project-id are required (or set VULNZ_TOKEN and VULNZ_PROJECT_ID env vars)")
-		}
-
-		ctx := context.Background()
-
-		config := vulnz.Config{
-			ProjectID:  projectID,
-			APIURL:     apiURL,
-			Token:      token,
-			OutputPath: outputPath,
-		}
-
-		client := vulnz.NewClient(config)
-
-		if verbose {
-			fmt.Fprintf(os.Stderr, "Downloading vulnerability database from %s...\n", client.DownloadURL())
-		}
-
-		meta, err := client.DownloadAndExtract(ctx, filepath.Dir(outputPath))
-		if err != nil {
-			return fmt.Errorf("failed to download database: %w", err)
-		}
-
-		if err := client.Verify(outputPath); err != nil {
-			return fmt.Errorf("database verification failed: %w", err)
-		}
-
-		fmt.Printf("Synced vulnerability database:\n")
-		fmt.Printf("  Path:     %s\n", outputPath)
-		fmt.Printf("  Providers: %s\n", strings.Join(meta.Providers, ", "))
-		fmt.Printf("  Count:    %d vulnerabilities\n", meta.VulnCount)
-		if !meta.LastUpdate.IsZero() {
-			fmt.Printf("  Updated:  %s\n", meta.LastUpdate.Format(time.RFC3339))
-		}
-
-		return nil
-	},
-}
-
-var dbCheckVulnzCmd = &cobra.Command{
-	Use:   "check",
-	Short: "Check vulnz connectivity and database status",
-	Long:  `Verify connectivity to the vulnz service and check database status.`,
-	RunE: func(cmd *cobra.Command, args []string) error {
-		token, _ := cmd.Flags().GetString("token")
-		projectID, _ := cmd.Flags().GetString("project-id")
-		apiURL, _ := cmd.Flags().GetString("api-url")
-
-		if token == "" {
-			token = os.Getenv("VULNZ_TOKEN")
-		}
-		if projectID == "" {
-			projectID = os.Getenv("VULNZ_PROJECT_ID")
-		}
-		if apiURL == "" {
-			apiURL = "https://gitlab.opencode.de"
-		}
-
-		if token == "" || projectID == "" {
-			return fmt.Errorf("token and project-id are required")
-		}
-
-		config := vulnz.Config{
-			ProjectID: projectID,
-			APIURL:    apiURL,
-			Token:     token,
-		}
-
-		client := vulnz.NewClient(config)
-
-		fmt.Printf("Checking vulnz at %s...\n", client.DownloadURL())
-
-		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-		defer cancel()
-
-		file, err := client.Download(ctx)
-		if err != nil {
-			return fmt.Errorf("connection failed: %w", err)
-		}
-		defer os.Remove(file.Name())
-		defer file.Close()
-
-		if vulnz.IsSQLite(file.Name()) {
-			fmt.Println("✓ Database is valid SQLite format")
-		} else {
-			return fmt.Errorf("downloaded file is not a valid SQLite database")
-		}
-
-		meta, err := client.GetMetadata(file.Name())
-		if err == nil {
-			fmt.Printf("✓ Database contains %d vulnerabilities\n", meta.VulnCount)
-			fmt.Printf("  Providers: %s\n", strings.Join(meta.Providers, ", "))
-			if !meta.LastUpdate.IsZero() {
-				fmt.Printf("  Last updated: %s\n", meta.LastUpdate.Format(time.RFC3339))
-			}
-		}
-
-		return nil
-	},
-}
-
 func init() {
 	rootCmd.AddCommand(dbCmd)
 	dbCmd.AddCommand(dbMigrateCmd)
-	dbCmd.AddCommand(dbSyncCmd)
-	dbCmd.AddCommand(dbCheckVulnzCmd)
 
 	rootCmd.AddCommand(listCmd)
 	rootCmd.AddCommand(showCmd)
@@ -370,14 +239,4 @@ func init() {
 
 	// Add flags for delete command
 	deleteCmd.Flags().BoolP("force", "f", false, "Force deletion without confirmation")
-
-	// Add flags for sync and check commands
-	dbSyncCmd.Flags().String("token", "", "GitLab API token (or set VULNZ_TOKEN env var)")
-	dbSyncCmd.Flags().String("project-id", "", "GitLab project ID (or set VULNZ_PROJECT_ID env var)")
-	dbSyncCmd.Flags().String("api-url", "https://gitlab.opencode.de", "GitLab API URL")
-	dbSyncCmd.Flags().StringP("output", "o", "vulnerabilities.db", "Output path for the database")
-
-	dbCheckVulnzCmd.Flags().String("token", "", "GitLab API token (or set VULNZ_TOKEN env var)")
-	dbCheckVulnzCmd.Flags().String("project-id", "", "GitLab project ID (or set VULNZ_PROJECT_ID env var)")
-	dbCheckVulnzCmd.Flags().String("api-url", "https://gitlab.opencode.de", "GitLab API URL")
 }
