@@ -78,11 +78,10 @@ func postSBOM(url, token, contentType string, data []byte, timeoutSecs int, inse
 		return nil
 	}
 
-	errMsg := fmt.Sprintf("server returned HTTP %d", resp.StatusCode)
 	if len(body) > 0 {
-		errMsg += ": " + string(body)
+		return fmt.Errorf("server returned HTTP %d: %s", resp.StatusCode, string(body))
 	}
-	return fmt.Errorf("%s", errMsg)
+	return fmt.Errorf("server returned HTTP %d", resp.StatusCode)
 }
 
 var submitCmd = &cobra.Command{

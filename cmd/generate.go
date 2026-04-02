@@ -75,6 +75,11 @@ Example usage:
 		ctx := context.Background()
 		var output string
 
+		// Warn if --binary is set without --bsi-compliant (flag would be silently ignored)
+		if generateBinary != "" && !generateBSICompliant {
+			fmt.Fprintf(os.Stderr, "warning: --binary requires --bsi-compliant, binary hash will not be applied\n")
+		}
+
 		// If BSI compliance is requested, generate SBOM then enrich JSON
 		if generateBSICompliant {
 			if verbose {

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"os"
 
 	"github.com/anchore/syft/syft"
 	"github.com/anchore/syft/syft/format/cyclonedxjson"
@@ -41,7 +42,7 @@ func (g *Generator) Generate(ctx context.Context, sourcePath string, format stri
 
 	if g.verbose {
 		desc := src.Describe()
-		fmt.Printf("Source detected: %s (ID: %s)\n", sourcePath, desc.ID)
+		fmt.Fprintf(os.Stderr, "Source detected: %s (ID: %s)\n", sourcePath, desc.ID)
 	}
 
 	// Create SBOM using native Syft
@@ -54,7 +55,7 @@ func (g *Generator) Generate(ctx context.Context, sourcePath string, format stri
 	}
 
 	if g.verbose {
-		fmt.Printf("Cataloged %d packages\n", sbomModel.Artifacts.Packages.PackageCount())
+		fmt.Fprintf(os.Stderr, "Cataloged %d packages\n", sbomModel.Artifacts.Packages.PackageCount())
 	}
 
 	// Convert to requested format
