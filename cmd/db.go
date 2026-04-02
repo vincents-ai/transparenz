@@ -1,14 +1,19 @@
 package cmd
 
 import (
+	"bufio"
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
+	"strings"
 	"text/tabwriter"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/spf13/cobra"
 
+	"github.com/shift/transparenz/internal/models"
 	"github.com/shift/transparenz/internal/repository"
 	"github.com/shift/transparenz/pkg/database"
 )
@@ -43,6 +48,27 @@ var dbMigrateCmd = &cobra.Command{
 	},
 }
 
+// sbomWithCount extends SBOM with a package count from a COUNT subquery,
+// avoiding the N+1 problem of Preload("Packages").
+type sbomWithCount struct {
+	models.SBOM
+	PackageCount int64
+}
+
+// sbomJSON is the JSON serialisation shape for db list --format json.
+type sbomJSON struct {
+	ID            string     `json:"id"`
+	Name          string     `json:"name"`
+	Version       string     `json:"version"`
+	Format        string     `json:"format"`
+	FormatVersion string     `json:"format_version"`
+	BSICompliant  bool       `json:"bsi_compliant"`
+	BSIScore      float64    `json:"bsi_score"`
+	PackageCount  int64      `json:"package_count"`
+	CreatedAt     time.Time  `json:"created_at"`
+	GeneratedAt   *time.Time `json:"generated_at"`
+}
+
 var listCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List all SBOMs from database",
@@ -56,47 +82,78 @@ var listCmd = &cobra.Command{
 
 		limit, _ := cmd.Flags().GetInt("limit")
 		offset, _ := cmd.Flags().GetInt("offset")
+		format, _ := cmd.Flags().GetString("format")
 
-		repo := repository.NewSBOMRepository(db)
-		sboms, err := repo.ListSBOMs(context.Background(), limit, offset)
-		if err != nil {
+		// Fix 3: replace Preload("Packages") with a COUNT subquery to avoid N+1.
+		var results []sbomWithCount
+		if err := db.Model(&models.SBOM{}).
+			Select("sboms.*, COUNT(packages.id) as package_count").
+			Joins("LEFT JOIN packages ON packages.sbom_id = sboms.id AND packages.deleted_at IS NULL").
+			Where("sboms.deleted_at IS NULL").
+			Group("sboms.id").
+			Order("sboms.created_at DESC").
+			Limit(limit).Offset(offset).
+			Scan(&results).Error; err != nil {
 			return fmt.Errorf("failed to list SBOMs: %w", err)
 		}
 
-		if len(sboms) == 0 {
+		if len(results) == 0 {
 			fmt.Println("No SBOMs found in database")
 			return nil
 		}
 
-		// Print table
-		w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-		fmt.Fprintln(w, "ID\tNAME\tVERSION\tFORMAT\tPACKAGES\tGENERATED\tBSI\tCREATED")
-		fmt.Fprintln(w, "--\t----\t-------\t------\t--------\t---------\t---\t-------")
-		for _, sbom := range sboms {
-			generated := "N/A"
-			if sbom.GeneratedAt != nil {
-				generated = sbom.GeneratedAt.Format("2006-01-02")
+		// Fix 1: honour --format flag.
+		switch strings.ToLower(format) {
+		case "json":
+			out := make([]sbomJSON, 0, len(results))
+			for _, r := range results {
+				out = append(out, sbomJSON{
+					ID:            r.ID.String(),
+					Name:          r.Name,
+					Version:       r.Version,
+					Format:        r.Format,
+					FormatVersion: r.FormatVersion,
+					BSICompliant:  r.BSICompliant,
+					BSIScore:      r.BSIScore,
+					PackageCount:  r.PackageCount,
+					CreatedAt:     r.CreatedAt,
+					GeneratedAt:   r.GeneratedAt,
+				})
 			}
-			bsiStatus := "-"
-			if sbom.BSICheckedAt != nil {
-				if sbom.BSICompliant {
-					bsiStatus = fmt.Sprintf("✓ (%.0f%%)", sbom.BSIScore*100)
-				} else {
-					bsiStatus = fmt.Sprintf("✗ (%.0f%%)", sbom.BSIScore*100)
+			enc := json.NewEncoder(os.Stdout)
+			enc.SetIndent("", "  ")
+			return enc.Encode(out)
+
+		default: // "table" or empty string
+			w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
+			fmt.Fprintln(w, "ID\tNAME\tVERSION\tFORMAT\tPACKAGES\tGENERATED\tBSI\tCREATED")
+			fmt.Fprintln(w, "--\t----\t-------\t------\t--------\t---------\t---\t-------")
+			for _, r := range results {
+				generated := "N/A"
+				if r.GeneratedAt != nil {
+					generated = r.GeneratedAt.Format("2006-01-02")
 				}
+				bsiStatus := "-"
+				if r.BSICheckedAt != nil {
+					if r.BSICompliant {
+						bsiStatus = fmt.Sprintf("✓ (%.0f%%)", r.BSIScore*100)
+					} else {
+						bsiStatus = fmt.Sprintf("✗ (%.0f%%)", r.BSIScore*100)
+					}
+				}
+				fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%d\t%s\t%s\t%s\n",
+					r.ID.String()[:8],
+					r.Name,
+					r.Version,
+					r.Format,
+					r.PackageCount,
+					generated,
+					bsiStatus,
+					r.CreatedAt.Format("2006-01-02 15:04"),
+				)
 			}
-			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%d\t%s\t%s\t%s\n",
-				sbom.ID.String()[:8],
-				sbom.Name,
-				sbom.Version,
-				sbom.Format,
-				len(sbom.Packages),
-				generated,
-				bsiStatus,
-				sbom.CreatedAt.Format("2006-01-02 15:04"),
-			)
+			w.Flush()
 		}
-		w.Flush()
 
 		return nil
 	},
@@ -227,6 +284,19 @@ var deleteCmd = &cobra.Command{
 			return fmt.Errorf("invalid SBOM ID: %w", err)
 		}
 
+		// Fix 2: require confirmation unless --force is set.
+		force, _ := cmd.Flags().GetBool("force")
+		if !force {
+			fmt.Printf("Delete SBOM %s? [y/N]: ", sbomID.String())
+			scanner := bufio.NewScanner(os.Stdin)
+			scanner.Scan()
+			answer := strings.TrimSpace(scanner.Text())
+			if answer != "y" && answer != "Y" {
+				fmt.Println("Aborted.")
+				return nil
+			}
+		}
+
 		repo := repository.NewSBOMRepository(db)
 		if err := repo.DeleteSBOM(context.Background(), sbomID); err != nil {
 			return fmt.Errorf("failed to delete SBOM: %w", err)
@@ -249,7 +319,7 @@ func init() {
 	// Add flags for list command
 	listCmd.Flags().IntP("limit", "l", 50, "Maximum number of SBOMs to display")
 	listCmd.Flags().IntP("offset", "s", 0, "Offset for pagination")
-	listCmd.Flags().String("format", "", "Filter by SBOM format (spdx, cyclonedx)")
+	listCmd.Flags().String("format", "table", "Output format: table (default) or json")
 
 	// Add flags for delete command
 	deleteCmd.Flags().BoolP("force", "f", false, "Force deletion without confirmation")
