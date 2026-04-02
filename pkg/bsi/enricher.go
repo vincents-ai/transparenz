@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/anchore/syft/syft/license"
 	"github.com/anchore/syft/syft/pkg"
@@ -333,6 +334,9 @@ func (e *Enricher) buildBSIProperties(comp map[string]interface{}) []interface{}
 func (e *Enricher) buildBSIAnnotations(pkg map[string]interface{}) []interface{} {
 	annotations := []interface{}{}
 
+	// Capture a single consistent timestamp for all annotations in this enrichment run
+	now := time.Now().UTC().Format(time.RFC3339)
+
 	// Determine package type from SPDXID or source info
 	spdxID := getString(pkg, "SPDXID")
 	executable := "false"
@@ -344,7 +348,7 @@ func (e *Enricher) buildBSIAnnotations(pkg map[string]interface{}) []interface{}
 	annotations = append(annotations,
 		map[string]interface{}{
 			"annotator":      "Tool: transparenz-bsi-enricher",
-			"annotationDate": "",
+			"annotationDate": now,
 			"annotationType": "OTHER",
 			"comment":        fmt.Sprintf("BSI TR-03183-2: executable=%s, archive=false, structured=true", executable),
 		},
@@ -408,7 +412,7 @@ func (e *Enricher) assertDependencyCompleteness(sbomData map[string]interface{})
 		annotations = append(annotations,
 			map[string]interface{}{
 				"annotator":      "Tool: transparenz-bsi-enricher",
-				"annotationDate": "",
+				"annotationDate": time.Now().UTC().Format(time.RFC3339),
 				"annotationType": "OTHER",
 				"comment":        "BSI TR-03183-2: dependencyCompleteness=complete, scope=transitive",
 			},
