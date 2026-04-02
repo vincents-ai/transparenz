@@ -10,7 +10,7 @@ before:
 
 builds:
   - id: transparenz
-    main: ./cmd/transparenz/main.go
+    main: ./main.go
     binary: transparenz
     env:
       - CGO_ENABLED=0
@@ -36,7 +36,7 @@ archives:
         format: zip
     files:
       - README.md
-      - LICENSE
+      - LICENSE.md
       - docs/*
 
 checksum:
@@ -81,7 +81,7 @@ brews:
   - name: transparenz
     homepage: "https://github.com/deutschland-stack/transparenz"
     description: "BSI TR-03183 compliant SBOM generator for Deutschland-Stack"
-    license: "Apache-2.0"
+    license: "AGPL-3.0-or-later"
     folder: Formula
     repository:
       owner: deutschland-stack

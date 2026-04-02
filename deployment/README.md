@@ -39,7 +39,7 @@ docker run --rm transparenz-go:1.0.0 generate /path/to/project
 
 ## Key Features
 
-- **Minimal Size**: ~20MB Docker image (scratch-based)
+- **Minimal Size**: Docker image size varies by platform (scratch-based)
 - **Zero Dependencies**: Static binary, no runtime deps
 - **Native Performance**: Go implementation with native Syft/Grype
 - **Kubernetes-Ready**: Runs as non-root, read-only filesystem
@@ -73,7 +73,7 @@ spec:
       containers:
         - name: transparenz-go
           image: ghcr.io/deutschland-stack/transparenz-go:1.0.0
-          command: ["/transparenz", "generate", "--batch", "/data"]
+          command: ["/transparenz", "generate", "/data", "--bsi-compliant", "--output", "/output/sbom.json"]
           volumeMounts:
             - name: data
               mountPath: /data
@@ -88,4 +88,4 @@ spec:
 
 ## License
 
-Apache-2.0
+AGPL-3.0-or-later

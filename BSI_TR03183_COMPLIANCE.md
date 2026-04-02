@@ -10,12 +10,12 @@
 
 | Section | Requirement | Feature File | Test Scenarios | Status |
 |---------|-------------|--------------|----------------|--------|
-| **4.2** | SBOM Format (CycloneDX 1.4+/SPDX 2.3+) | BSI_TR03183_01 | 4 | ✅ Implemented |
+| **4.2** | SBOM Format (CycloneDX 1.6+/SPDX 2.3+) | BSI_TR03183_01 | 4 | ✅ Implemented |
 | **4.3** | Document Metadata (timestamp, tools) | BSI_TR03183_02 | 4 | ✅ Implemented |
 | **4.4** | Primary Component (name, version, type, supplier) | BSI_TR03183_03 | 4 | ✅ Implemented |
 | **8.1.1-8.1.5** | Component Fields (name, version, purl, type, supplier) | BSI_TR03183_04 | 5 | ✅ Implemented |
 | **8.1.6** | License Identifiers (SPDX format) | BSI_TR03183_05 | 4 | ✅ Implemented |
-| **8.1.7** | Cryptographic Hashes (SHA-256+) | BSI_TR03183_06 | 4 | ✅ Implemented |
+| **8.1.7** | Cryptographic Hashes (SHA-512 mandatory) | BSI_TR03183_06 | 4 | ✅ Implemented |
 | **8.1.8** | Component Properties (executable, archive, structured) | BSI_TR03183_07 | 4 | ✅ Implemented |
 | **8.1.9** | Filename | BSI_TR03183_04 | Included | ✅ Implemented |
 | **8.1.10** | Dependency Relationships | BSI_TR03183_08 | 4 | ✅ Implemented |
@@ -102,7 +102,7 @@ go test -v -cover ./tests/...
 TR-03183-2 COMPLIANCE CHECKLIST
 
 FORMAT:
-[✓] CycloneDX 1.4+ or SPDX 2.3+
+[✓] CycloneDX 1.6+ or SPDX 2.3+
 [✓] Valid according to schema
 [✓] Machine-readable
 
@@ -123,7 +123,7 @@ COMPONENTS:
 [✓] Supplier information
 [✓] Unique identifier (purl)
 [✓] License information (SPDX)
-[✓] Hash (SHA-256 minimum)
+[✓] Hash (SHA-512 mandatory; SHA-256 alone is non-compliant)
 [✓] Component type
 [ ] Filename (partially)
 [✓] Properties (executable, archive, structured)

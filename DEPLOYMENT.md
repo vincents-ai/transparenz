@@ -398,6 +398,7 @@ pipeline {
 GORM handles connection pooling automatically. Tune via environment:
 
 ```bash
+# Note: connection pool settings are currently hardcoded; these env vars are not yet implemented
 # Max open connections
 export DB_MAX_OPEN_CONNS=25
 
@@ -423,12 +424,12 @@ find /projects -type d -maxdepth 1 | \
 **Minimum:**
 - CPU: 1 core
 - Memory: 256MB RAM
-- Disk: 50MB (binary: 19MB + working space)
+- Disk: 50MB (binary size varies by platform + working space)
 
 **Recommended (production):**
 - CPU: 2 cores
 - Memory: 512MB RAM
-- Disk: 1GB (19MB binary + database)
+- Disk: 1GB (binary size varies by platform + database)
 
 ## Security Considerations
 
@@ -591,6 +592,8 @@ find /backups -name "transparenz_*.sql.gz" -mtime +30 -delete
 - Documentation: https://github.com/deutschland-stack/transparenz-go/blob/main/README.md
 - Python Version: https://github.com/deutschland-stack/transparenz
 
+> **Commands reference:** See README.md for the full commands reference, including `enrich`, `submit`, and `db export`.
+
 ## License
 
-Apache License 2.0
+AGPL-3.0-or-later

@@ -33,7 +33,7 @@ Regulation (EU) 2024/2847 - Effective 11 December 2024, full enforcement 11 Dece
 
 | ID | Requirement | BSI Reference | Status |
 |----|-------------|---------------|--------|
-| BSI-01 | SBOM format: CycloneDX 1.6+ OR SPDX 3.0.1+ (JSON/XML) | Section 4 | Implemented |
+| BSI-01 | SBOM format: CycloneDX 1.6+ OR SPDX 2.3+ (JSON/XML) | Section 4 | Implemented |
 | BSI-02 | SBOM Creator field (email or URL) | Section 5.2.1 | Implemented |
 | BSI-03 | SBOM Timestamp (RFC 3339, UTC recommended) | Section 5.2.1 | Implemented |
 | BSI-04 | Component Creator (email or URL per component) | Section 5.2.2 | Implemented |
@@ -86,7 +86,7 @@ The SBOM must be retrievable and presentable.
 
 ### BSI-01: Format Versioning
 - CycloneDX: version 1.6 or higher
-- SPDX: version 3.0.1 or higher
+- SPDX: version 2.3 or higher
 - Only officially released versions are compliant
 
 ### BSI-08: Dependency Completeness
