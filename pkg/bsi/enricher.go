@@ -975,6 +975,127 @@ func (e *Enricher) enrichSPDXWithArtifactHashes(packages []interface{}, artifact
 	return nil
 }
 
+// EnrichWithBinaryHash computes the SHA-512 of a single binary file and
+// injects it into the SBOM's metadata.component.hashes (CycloneDX) or
+// the primary package checksums (SPDX). This is the BSI TR-03183-2 §4.3
+// single-artifact shortcut for tools producing one binary.
+//
+// For CycloneDX SBOMs the SHA-512 entry is added (or replaced) inside
+// metadata.component.hashes:
+//
+//	[{"alg": "SHA-512", "content": "<hex>"}]
+//
+// For SPDX SBOMs the entry is appended to the first package whose name
+// matches the binary filename; if no package matches, the first package is
+// used.  The checksum is written in SPDX format:
+//
+//	{"algorithm": "SHA512", "checksumValue": "<hex>"}
+func (e *Enricher) EnrichWithBinaryHash(sbomJSON string, binaryPath string) (string, error) {
+	hash, err := calculateFileHash(binaryPath)
+	if err != nil {
+		return "", fmt.Errorf("EnrichWithBinaryHash: failed to hash %s: %w", binaryPath, err)
+	}
+
+	var sbomData map[string]interface{}
+	if err := json.Unmarshal([]byte(sbomJSON), &sbomData); err != nil {
+		return "", fmt.Errorf("EnrichWithBinaryHash: failed to parse SBOM: %w", err)
+	}
+
+	binaryName := filepath.Base(binaryPath)
+
+	if bomFormat, ok := sbomData["bomFormat"].(string); ok && bomFormat == "CycloneDX" {
+		e.injectBinaryHashCycloneDX(sbomData, hash)
+	} else {
+		e.injectBinaryHashSPDX(sbomData, binaryName, hash)
+	}
+
+	enriched, err := json.MarshalIndent(sbomData, "", "  ")
+	if err != nil {
+		return "", fmt.Errorf("EnrichWithBinaryHash: failed to marshal SBOM: %w", err)
+	}
+	return string(enriched), nil
+}
+
+// injectBinaryHashCycloneDX injects the SHA-512 into metadata.component.hashes.
+// If metadata or metadata.component does not exist, it is created.
+// An existing SHA-512 entry in the hashes array is replaced.
+func (e *Enricher) injectBinaryHashCycloneDX(sbomData map[string]interface{}, hash string) {
+	metadata, ok := sbomData["metadata"].(map[string]interface{})
+	if !ok {
+		metadata = map[string]interface{}{}
+		sbomData["metadata"] = metadata
+	}
+
+	component, ok := metadata["component"].(map[string]interface{})
+	if !ok {
+		component = map[string]interface{}{}
+		metadata["component"] = component
+	}
+
+	// Build new hashes array: preserve non-SHA-512 entries, replace/add SHA-512
+	existing, _ := component["hashes"].([]interface{})
+	hashes := make([]interface{}, 0, len(existing)+1)
+	for _, h := range existing {
+		if hm, ok := h.(map[string]interface{}); ok {
+			if getString(hm, "alg") == "SHA-512" {
+				continue // will be replaced below
+			}
+		}
+		hashes = append(hashes, h)
+	}
+	hashes = append(hashes, map[string]interface{}{
+		"alg":     "SHA-512",
+		"content": hash,
+	})
+	component["hashes"] = hashes
+}
+
+// injectBinaryHashSPDX appends a SHA-512 checksum to the best-matching SPDX package.
+// It prefers the package whose name equals binaryName; falls back to the first package.
+func (e *Enricher) injectBinaryHashSPDX(sbomData map[string]interface{}, binaryName, hash string) {
+	packages, ok := sbomData["packages"].([]interface{})
+	if !ok || len(packages) == 0 {
+		return
+	}
+
+	// Find best-match index: prefer package whose name equals binaryName
+	targetIdx := 0
+	for i, pkgData := range packages {
+		pkg, ok := pkgData.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		if getString(pkg, "name") == binaryName {
+			targetIdx = i
+			break
+		}
+	}
+
+	pkg, ok := packages[targetIdx].(map[string]interface{})
+	if !ok {
+		return
+	}
+
+	checksums, _ := pkg["checksums"].([]interface{})
+	// Replace existing SHA512 entry if present
+	filtered := make([]interface{}, 0, len(checksums)+1)
+	for _, cs := range checksums {
+		if csm, ok := cs.(map[string]interface{}); ok {
+			if getString(csm, "algorithm") == "SHA512" {
+				continue
+			}
+		}
+		filtered = append(filtered, cs)
+	}
+	filtered = append(filtered, map[string]interface{}{
+		"algorithm":     "SHA512",
+		"checksumValue": hash,
+	})
+	pkg["checksums"] = filtered
+	packages[targetIdx] = pkg
+	sbomData["packages"] = packages
+}
+
 // InjectManufacturer injects the SBOM-producing organisation's identity
 // into CycloneDX metadata.manufacturer and SPDX document-level annotation.
 //

@@ -22,6 +22,7 @@ var (
 	generateBSICompliant    bool
 	generateManufacturer    string
 	generateManufacturerURL string
+	generateBinary          string
 
 	// submit shortcut flags
 	generateSubmit    bool
@@ -119,6 +120,22 @@ Example usage:
 
 			if verbose {
 				fmt.Fprintf(os.Stderr, "BSI enrichment complete\n")
+			}
+
+			// Inject binary hash if --binary path provided (BSI TR-03183-2 §4.3)
+			if generateBinary != "" {
+				absBinary, err := filepath.Abs(generateBinary)
+				if err != nil {
+					return fmt.Errorf("failed to resolve binary path: %w", err)
+				}
+				if _, statErr := os.Stat(absBinary); os.IsNotExist(statErr) {
+					return fmt.Errorf("binary not found: %s", absBinary)
+				}
+				output, err = enricher.EnrichWithBinaryHash(output, absBinary)
+				if err != nil {
+					return fmt.Errorf("failed to inject binary hash: %w", err)
+				}
+				fmt.Fprintf(os.Stderr, "Binary SHA-512 hash injected: %s\n", absBinary)
 			}
 		} else {
 			// Standard generation without enrichment
@@ -224,6 +241,7 @@ func init() {
 	generateCmd.Flags().BoolVarP(&generateBSICompliant, "bsi-compliant", "b", false, "Generate BSI TR-03183 compliant SBOM (adds hashes, licenses, suppliers)")
 	generateCmd.Flags().StringVar(&generateManufacturer, "manufacturer", "", "SBOM producer organisation name (BSI TR-03183-2, also env: TRANSPARENZ_MANUFACTURER)")
 	generateCmd.Flags().StringVar(&generateManufacturerURL, "manufacturer-url", "", "SBOM producer organisation URL (also env: TRANSPARENZ_MANUFACTURER_URL)")
+	generateCmd.Flags().StringVar(&generateBinary, "binary", "", "Path to compiled binary for SHA-512 hash injection (BSI TR-03183-2 §4.3, requires --bsi-compliant)")
 	generateCmd.Flags().BoolVar(&generateSubmit, "submit", false, "Submit generated SBOM to a remote server after generation")
 	generateCmd.Flags().StringVar(&generateServerURL, "server-url", "", "Remote server endpoint for SBOM submission (also env: TRANSPARENZ_SERVER_URL)")
 	generateCmd.Flags().StringVar(&generateToken, "token", "", "Bearer token for SBOM submission (also env: TRANSPARENZ_TOKEN)")

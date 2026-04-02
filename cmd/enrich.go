@@ -14,6 +14,7 @@ import (
 var (
 	enrichOutput          string
 	enrichArtifacts       string
+	enrichBinary          string
 	enrichManufacturer    string
 	enrichManufacturerURL string
 )
@@ -112,6 +113,30 @@ Example usage:
 			return fmt.Errorf("failed to marshal enriched SBOM: %w", err)
 		}
 
+		outputStr := string(output)
+
+		// Add SHA-512 binary hash if --binary provided (BSI TR-03183-2 §4.3)
+		// Applied after --artifacts so both can be used together.
+		if enrichBinary != "" {
+			absBinary, err := filepath.Abs(enrichBinary)
+			if err != nil {
+				return fmt.Errorf("failed to resolve binary path: %w", err)
+			}
+			if _, statErr := os.Stat(absBinary); os.IsNotExist(statErr) {
+				return fmt.Errorf("binary not found: %s", absBinary)
+			}
+			if verbose {
+				fmt.Fprintf(os.Stderr, "Computing SHA-512 hash for binary: %s\n", absBinary)
+			}
+			outputStr, err = enricher.EnrichWithBinaryHash(outputStr, absBinary)
+			if err != nil {
+				return fmt.Errorf("failed to inject binary hash: %w", err)
+			}
+			if verbose {
+				fmt.Fprintf(os.Stderr, "Binary SHA-512 hash injected\n")
+			}
+		}
+
 		// Inject SBOM producer identity (BSI TR-03183-2: metadata.manufacturer)
 		mfr := enrichManufacturer
 		if mfr == "" {
@@ -121,7 +146,6 @@ Example usage:
 		if mfrURL == "" {
 			mfrURL = os.Getenv("TRANSPARENZ_MANUFACTURER_URL")
 		}
-		outputStr := string(output)
 		if mfr != "" {
 			outputStr, err = enricher.InjectManufacturer(outputStr, mfr, mfrURL)
 			if err != nil {
@@ -156,6 +180,9 @@ Example usage:
 		if enrichArtifacts != "" {
 			fmt.Fprintf(os.Stderr, "SHA-512 artifact hashes: computed from %s\n", enrichArtifacts)
 		}
+		if enrichBinary != "" {
+			fmt.Fprintf(os.Stderr, "Binary SHA-512 hash: %s\n", enrichBinary)
+		}
 		if mfr != "" {
 			fmt.Fprintf(os.Stderr, "Manufacturer: %s\n", mfr)
 		}
@@ -170,6 +197,7 @@ func init() {
 
 	enrichCmd.Flags().StringVarP(&enrichOutput, "output", "o", "", "Output file path (default: stdout)")
 	enrichCmd.Flags().StringVar(&enrichArtifacts, "artifacts", "", "Directory containing compiled binaries for SHA-512 hash computation")
+	enrichCmd.Flags().StringVar(&enrichBinary, "binary", "", "Path to a single compiled binary for SHA-512 hash injection (BSI TR-03183-2 §4.3)")
 	enrichCmd.Flags().StringVar(&enrichManufacturer, "manufacturer", "", "SBOM producer organisation name (BSI TR-03183-2, also env: TRANSPARENZ_MANUFACTURER)")
 	enrichCmd.Flags().StringVar(&enrichManufacturerURL, "manufacturer-url", "", "SBOM producer organisation URL (also env: TRANSPARENZ_MANUFACTURER_URL)")
 }

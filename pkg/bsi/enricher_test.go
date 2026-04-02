@@ -1319,6 +1319,329 @@ func contains(s, substr string) bool {
 	return strings.Contains(s, substr)
 }
 
+// ---------------------------------------------------------------------------
+// TestEnrichWithBinaryHash – BSI TR-03183-2 §4.3 single-binary shortcut
+// ---------------------------------------------------------------------------
+
+func TestEnrichWithBinaryHash_CycloneDX(t *testing.T) {
+	enricher := NewEnricher(".")
+
+	// Create a temp file with known content and compute expected hash
+	tmpDir := t.TempDir()
+	binaryPath := filepath.Join(tmpDir, "myapp")
+	content := []byte("fake compiled binary content for hashing")
+	if err := os.WriteFile(binaryPath, content, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	expectedHash, err := CalculateArtifactHash(binaryPath)
+	if err != nil {
+		t.Fatalf("CalculateArtifactHash failed: %v", err)
+	}
+	if len(expectedHash) != 128 {
+		t.Fatalf("Expected 128-char SHA-512 hex, got %d", len(expectedHash))
+	}
+
+	sbomJSON := `{
+		"bomFormat": "CycloneDX",
+		"specVersion": "1.6",
+		"metadata": {},
+		"components": []
+	}`
+
+	result, err := enricher.EnrichWithBinaryHash(sbomJSON, binaryPath)
+	if err != nil {
+		t.Fatalf("EnrichWithBinaryHash failed: %v", err)
+	}
+
+	var parsed map[string]interface{}
+	if err := json.Unmarshal([]byte(result), &parsed); err != nil {
+		t.Fatalf("Result is not valid JSON: %v", err)
+	}
+
+	metadata, ok := parsed["metadata"].(map[string]interface{})
+	if !ok {
+		t.Fatal("metadata must be a map")
+	}
+	component, ok := metadata["component"].(map[string]interface{})
+	if !ok {
+		t.Fatal("metadata.component must be present and be a map")
+	}
+	hashes, ok := component["hashes"].([]interface{})
+	if !ok || len(hashes) == 0 {
+		t.Fatal("metadata.component.hashes must be a non-empty array")
+	}
+
+	found := false
+	for _, h := range hashes {
+		hm, ok := h.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		if hm["alg"] == "SHA-512" && hm["content"] == expectedHash {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("Expected SHA-512 hash %s in metadata.component.hashes, got %v", expectedHash, hashes)
+	}
+}
+
+func TestEnrichWithBinaryHash_CycloneDX_NoMetadata(t *testing.T) {
+	enricher := NewEnricher(".")
+
+	tmpDir := t.TempDir()
+	binaryPath := filepath.Join(tmpDir, "tool")
+	if err := os.WriteFile(binaryPath, []byte("binary"), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	// SBOM with no metadata at all
+	sbomJSON := `{
+		"bomFormat": "CycloneDX",
+		"specVersion": "1.6",
+		"components": []
+	}`
+
+	result, err := enricher.EnrichWithBinaryHash(sbomJSON, binaryPath)
+	if err != nil {
+		t.Fatalf("EnrichWithBinaryHash failed: %v", err)
+	}
+
+	var parsed map[string]interface{}
+	if err := json.Unmarshal([]byte(result), &parsed); err != nil {
+		t.Fatalf("Result is not valid JSON: %v", err)
+	}
+
+	metadata, ok := parsed["metadata"].(map[string]interface{})
+	if !ok {
+		t.Fatal("metadata should be created when absent")
+	}
+	component, ok := metadata["component"].(map[string]interface{})
+	if !ok {
+		t.Fatal("metadata.component should be created when absent")
+	}
+	hashes, ok := component["hashes"].([]interface{})
+	if !ok || len(hashes) == 0 {
+		t.Fatal("Expected hashes to be added")
+	}
+}
+
+func TestEnrichWithBinaryHash_CycloneDX_ReplacesExistingHash(t *testing.T) {
+	enricher := NewEnricher(".")
+
+	tmpDir := t.TempDir()
+	binaryPath := filepath.Join(tmpDir, "app")
+	if err := os.WriteFile(binaryPath, []byte("updated binary"), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	newHash, err := CalculateArtifactHash(binaryPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// SBOM already has an old SHA-512 and an MD5 entry
+	sbomJSON := `{
+		"bomFormat": "CycloneDX",
+		"specVersion": "1.6",
+		"metadata": {
+			"component": {
+				"hashes": [
+					{"alg": "MD5",    "content": "deadbeef"},
+					{"alg": "SHA-512","content": "oldoldoldold"}
+				]
+			}
+		},
+		"components": []
+	}`
+
+	result, err := enricher.EnrichWithBinaryHash(sbomJSON, binaryPath)
+	if err != nil {
+		t.Fatalf("EnrichWithBinaryHash failed: %v", err)
+	}
+
+	var parsed map[string]interface{}
+	if err := json.Unmarshal([]byte(result), &parsed); err != nil {
+		t.Fatal(err)
+	}
+
+	hashes := parsed["metadata"].(map[string]interface{})["component"].(map[string]interface{})["hashes"].([]interface{})
+
+	// MD5 must be preserved; old SHA-512 must be replaced
+	foundMD5 := false
+	for _, h := range hashes {
+		hm := h.(map[string]interface{})
+		if hm["alg"] == "MD5" {
+			foundMD5 = true
+		}
+		if hm["alg"] == "SHA-512" && hm["content"] == "oldoldoldold" {
+			t.Error("old SHA-512 should have been replaced")
+		}
+		if hm["alg"] == "SHA-512" && hm["content"] == newHash {
+			// good
+		}
+	}
+	if !foundMD5 {
+		t.Error("MD5 entry should be preserved")
+	}
+}
+
+func TestEnrichWithBinaryHash_SPDX_FirstPackage(t *testing.T) {
+	enricher := NewEnricher(".")
+
+	tmpDir := t.TempDir()
+	binaryPath := filepath.Join(tmpDir, "no-match-name")
+	if err := os.WriteFile(binaryPath, []byte("spdx binary"), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	expectedHash, err := CalculateArtifactHash(binaryPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Binary name doesn't match any package → falls back to first package
+	sbomJSON := `{
+		"spdxVersion": "SPDX-2.3",
+		"packages": [
+			{"name": "my-project", "SPDXID": "SPDXRef-Package", "checksums": []},
+			{"name": "some-dep",   "SPDXID": "SPDXRef-Dep",     "checksums": []}
+		]
+	}`
+
+	result, err := enricher.EnrichWithBinaryHash(sbomJSON, binaryPath)
+	if err != nil {
+		t.Fatalf("EnrichWithBinaryHash failed: %v", err)
+	}
+
+	var parsed map[string]interface{}
+	if err := json.Unmarshal([]byte(result), &parsed); err != nil {
+		t.Fatal(err)
+	}
+
+	packages := parsed["packages"].([]interface{})
+	firstPkg := packages[0].(map[string]interface{})
+	checksums, ok := firstPkg["checksums"].([]interface{})
+	if !ok || len(checksums) == 0 {
+		t.Fatal("Expected checksums to be added to the first package")
+	}
+
+	found := false
+	for _, cs := range checksums {
+		csm := cs.(map[string]interface{})
+		if csm["algorithm"] == "SHA512" && csm["checksumValue"] == expectedHash {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("Expected SHA512 checksum %s in first package, got %v", expectedHash, checksums)
+	}
+
+	// Second package should be untouched
+	secondPkg := packages[1].(map[string]interface{})
+	secondChecksums := secondPkg["checksums"].([]interface{})
+	if len(secondChecksums) != 0 {
+		t.Error("Second package should not have received a checksum")
+	}
+}
+
+func TestEnrichWithBinaryHash_SPDX_MatchesByName(t *testing.T) {
+	enricher := NewEnricher(".")
+
+	tmpDir := t.TempDir()
+	binaryPath := filepath.Join(tmpDir, "exact-name")
+	if err := os.WriteFile(binaryPath, []byte("named binary"), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	sbomJSON := `{
+		"spdxVersion": "SPDX-2.3",
+		"packages": [
+			{"name": "other-pkg", "SPDXID": "SPDXRef-Other", "checksums": []},
+			{"name": "exact-name","SPDXID": "SPDXRef-Main",  "checksums": []}
+		]
+	}`
+
+	result, err := enricher.EnrichWithBinaryHash(sbomJSON, binaryPath)
+	if err != nil {
+		t.Fatalf("EnrichWithBinaryHash failed: %v", err)
+	}
+
+	var parsed map[string]interface{}
+	if err := json.Unmarshal([]byte(result), &parsed); err != nil {
+		t.Fatal(err)
+	}
+
+	packages := parsed["packages"].([]interface{})
+	// First package (other-pkg) should be untouched
+	firstPkg := packages[0].(map[string]interface{})
+	if cs := firstPkg["checksums"].([]interface{}); len(cs) != 0 {
+		t.Error("other-pkg should not have received a checksum")
+	}
+	// Second package (exact-name) should have the hash
+	secondPkg := packages[1].(map[string]interface{})
+	secondChecksums, ok := secondPkg["checksums"].([]interface{})
+	if !ok || len(secondChecksums) == 0 {
+		t.Fatal("exact-name package should have received a checksum")
+	}
+	csm := secondChecksums[0].(map[string]interface{})
+	if csm["algorithm"] != "SHA512" {
+		t.Errorf("Expected algorithm SHA512, got %v", csm["algorithm"])
+	}
+}
+
+func TestEnrichWithBinaryHash_FileNotFound(t *testing.T) {
+	enricher := NewEnricher(".")
+
+	sbomJSON := `{"bomFormat": "CycloneDX", "specVersion": "1.6", "metadata": {}, "components": []}`
+
+	_, err := enricher.EnrichWithBinaryHash(sbomJSON, "/nonexistent/binary")
+	if err == nil {
+		t.Error("Expected error for non-existent binary path")
+	}
+}
+
+func TestEnrichWithBinaryHash_InvalidJSON(t *testing.T) {
+	enricher := NewEnricher(".")
+
+	tmpDir := t.TempDir()
+	binaryPath := filepath.Join(tmpDir, "bin")
+	if err := os.WriteFile(binaryPath, []byte("data"), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := enricher.EnrichWithBinaryHash("not valid json", binaryPath)
+	if err == nil {
+		t.Error("Expected error for invalid JSON input")
+	}
+}
+
+func TestEnrichWithBinaryHash_SPDX_EmptyPackages(t *testing.T) {
+	enricher := NewEnricher(".")
+
+	tmpDir := t.TempDir()
+	binaryPath := filepath.Join(tmpDir, "app")
+	if err := os.WriteFile(binaryPath, []byte("data"), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Empty packages array – should not panic, should succeed gracefully
+	sbomJSON := `{"spdxVersion": "SPDX-2.3", "packages": []}`
+
+	result, err := enricher.EnrichWithBinaryHash(sbomJSON, binaryPath)
+	if err != nil {
+		t.Fatalf("EnrichWithBinaryHash on empty packages should not error: %v", err)
+	}
+
+	var parsed map[string]interface{}
+	if err := json.Unmarshal([]byte(result), &parsed); err != nil {
+		t.Fatalf("Result must be valid JSON: %v", err)
+	}
+}
+
 // TestInjectManufacturer_CycloneDX verifies that CycloneDX SBOMs receive
 // metadata.manufacturer with name and url fields per BSI TR-03183-2.
 func TestInjectManufacturer_CycloneDX(t *testing.T) {
