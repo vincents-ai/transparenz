@@ -70,15 +70,20 @@ var listCmd = &cobra.Command{
 
 		// Print table
 		w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-		fmt.Fprintln(w, "ID\tNAME\tVERSION\tFORMAT\tPACKAGES\tCREATED")
-		fmt.Fprintln(w, "--\t----\t-------\t------\t--------\t-------")
+		fmt.Fprintln(w, "ID\tNAME\tVERSION\tFORMAT\tPACKAGES\tGENERATED\tCREATED")
+		fmt.Fprintln(w, "--\t----\t-------\t------\t--------\t---------\t-------")
 		for _, sbom := range sboms {
-			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%d\t%s\n",
+			generated := "N/A"
+			if sbom.GeneratedAt != nil {
+				generated = sbom.GeneratedAt.Format("2006-01-02")
+			}
+			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%d\t%s\t%s\n",
 				sbom.ID.String()[:8],
 				sbom.Name,
 				sbom.Version,
 				sbom.Format,
 				len(sbom.Packages),
+				generated,
 				sbom.CreatedAt.Format("2006-01-02 15:04"),
 			)
 		}

@@ -20,6 +20,7 @@ type SBOM struct {
 	DocumentNamespace string         `gorm:"type:text;not null;unique" json:"document_namespace"`
 	SourcePath        *string        `gorm:"type:text" json:"source_path,omitempty"`
 	SBOMJson          JSONB          `gorm:"type:jsonb;not null" json:"sbom_json"`
+	GeneratedAt       *time.Time     `gorm:"index" json:"generated_at,omitempty"`
 	CreatedAt         time.Time      `gorm:"not null;default:now();index:idx_sboms_created_at" json:"created_at"`
 	UpdatedAt         time.Time      `gorm:"not null;default:now()" json:"updated_at"`
 	DeletedAt         gorm.DeletedAt `gorm:"index" json:"-"`

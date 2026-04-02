@@ -8,7 +8,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 	"gorm.io/gorm"
@@ -26,6 +28,39 @@ func NewSBOMRepository(db *gorm.DB) *SBOMRepository {
 	return &SBOMRepository{db: db}
 }
 
+// normalizeHashAlgorithm normalizes SBOM algorithm names to match the PackageHash DB constraint.
+// Accepted values: SHA1, SHA256, SHA384, SHA512, MD5, SHA3-256, SHA3-384, SHA3-512,
+// BLAKE2b-256, BLAKE2b-384, BLAKE2b-512.
+// Returns an empty string if the algorithm is not recognized or supported.
+func normalizeHashAlgorithm(alg string) string {
+	switch strings.ToUpper(alg) {
+	case "SHA-1", "SHA1":
+		return "SHA1"
+	case "SHA-256", "SHA256":
+		return "SHA256"
+	case "SHA-384", "SHA384":
+		return "SHA384"
+	case "SHA-512", "SHA512":
+		return "SHA512"
+	case "MD5":
+		return "MD5"
+	case "SHA3-256":
+		return "SHA3-256"
+	case "SHA3-384":
+		return "SHA3-384"
+	case "SHA3-512":
+		return "SHA3-512"
+	case "BLAKE2B-256":
+		return "BLAKE2b-256"
+	case "BLAKE2B-384":
+		return "BLAKE2b-384"
+	case "BLAKE2B-512":
+		return "BLAKE2b-512"
+	default:
+		return ""
+	}
+}
+
 // SaveSBOM parses SBOM JSON and saves it to the database with all packages
 // Uses typed structs for robust parsing with compile-time safety
 func (r *SBOMRepository) SaveSBOM(ctx context.Context, sbomJSON string, sourcePath string) (uuid.UUID, error) {
@@ -36,7 +71,9 @@ func (r *SBOMRepository) SaveSBOM(ctx context.Context, sbomJSON string, sourcePa
 	var name string
 	var version string
 	var packages []models.Package
+	var hashes []models.PackageHash
 	var rawData interface{}
+	var generatedAt *time.Time
 
 	// Try SPDX format first
 	var spdxDoc SPDXDocument
@@ -51,6 +88,15 @@ func (r *SBOMRepository) SaveSBOM(ctx context.Context, sbomJSON string, sourcePa
 			version = spdxDoc.DocumentDescribes[0]
 		} else {
 			version = "1.0"
+		}
+
+		// Extract generation timestamp from creationInfo.created
+		if spdxDoc.CreationInfo != nil && spdxDoc.CreationInfo.Created != "" {
+			if t, err := time.Parse(time.RFC3339, spdxDoc.CreationInfo.Created); err == nil {
+				generatedAt = &t
+			} else {
+				log.Printf("warning: failed to parse SPDX creationInfo.created %q: %v", spdxDoc.CreationInfo.Created, err)
+			}
 		}
 
 		rawData = spdxDoc
@@ -68,6 +114,15 @@ func (r *SBOMRepository) SaveSBOM(ctx context.Context, sbomJSON string, sourcePa
 			} else {
 				name = "Unknown"
 				version = "1.0"
+			}
+
+			// Extract generation timestamp from metadata.timestamp
+			if cdxDoc.Metadata != nil && cdxDoc.Metadata.Timestamp != "" {
+				if t, err := time.Parse(time.RFC3339, cdxDoc.Metadata.Timestamp); err == nil {
+					generatedAt = &t
+				} else {
+					log.Printf("warning: failed to parse CycloneDX metadata.timestamp %q: %v", cdxDoc.Metadata.Timestamp, err)
+				}
 			}
 
 			rawData = cdxDoc
@@ -98,6 +153,7 @@ func (r *SBOMRepository) SaveSBOM(ctx context.Context, sbomJSON string, sourcePa
 		DocumentNamespace: documentNamespace,
 		SourcePath:        &sourcePath,
 		SBOMJson:          sbomJSONB,
+		GeneratedAt:       generatedAt,
 	}
 
 	// Begin transaction
@@ -107,12 +163,12 @@ func (r *SBOMRepository) SaveSBOM(ctx context.Context, sbomJSON string, sourcePa
 			return fmt.Errorf("failed to save SBOM: %w", err)
 		}
 
-		// Extract packages using typed structs
+		// Extract packages and hashes using typed structs
 		var extractErr error
 		if format == "SPDX" {
-			packages, extractErr = r.extractSPDXPackages(rawData.(SPDXDocument), sbom.ID)
+			packages, hashes, extractErr = r.extractSPDXPackages(rawData.(SPDXDocument), sbom.ID)
 		} else {
-			packages, extractErr = r.extractCycloneDXPackages(rawData.(CycloneDXDocument), sbom.ID)
+			packages, hashes, extractErr = r.extractCycloneDXPackages(rawData.(CycloneDXDocument), sbom.ID)
 		}
 
 		if extractErr != nil {
@@ -122,6 +178,15 @@ func (r *SBOMRepository) SaveSBOM(ctx context.Context, sbomJSON string, sourcePa
 		if len(packages) > 0 {
 			if err := tx.Create(&packages).Error; err != nil {
 				return fmt.Errorf("failed to save packages: %w", err)
+			}
+		}
+
+		// Save package hashes now that packages have DB-assigned IDs.
+		// The hashes slice was built with placeholder PackageId values (index-based);
+		// reassign them from the saved package slice which now carries real UUIDs.
+		if len(hashes) > 0 {
+			if err := tx.Create(&hashes).Error; err != nil {
+				return fmt.Errorf("failed to save package hashes: %w", err)
 			}
 		}
 
@@ -135,9 +200,13 @@ func (r *SBOMRepository) SaveSBOM(ctx context.Context, sbomJSON string, sourcePa
 	return sbom.ID, nil
 }
 
-// extractSPDXPackages extracts package information from typed SPDX document
-func (r *SBOMRepository) extractSPDXPackages(doc SPDXDocument, sbomID uuid.UUID) ([]models.Package, error) {
+// extractSPDXPackages extracts package information and checksums from a typed SPDX document.
+// Returns the packages, their associated PackageHash records, and any error.
+// PackageHash records reference the Package by index position; callers must ensure
+// packages are saved (to populate IDs) before saving hashes.
+func (r *SBOMRepository) extractSPDXPackages(doc SPDXDocument, sbomID uuid.UUID) ([]models.Package, []models.PackageHash, error) {
 	packages := make([]models.Package, 0, len(doc.Packages))
+	var hashes []models.PackageHash
 
 	for _, spdxPkg := range doc.Packages {
 		p := models.Package{
@@ -174,15 +243,37 @@ func (r *SBOMRepository) extractSPDXPackages(doc SPDXDocument, sbomID uuid.UUID)
 			p.Description = &spdxPkg.Description
 		}
 
+		// Assign a UUID now so hashes can reference it before DB insert
+		if p.ID == uuid.Nil {
+			p.ID = uuid.New()
+		}
+
+		// Build PackageHash records for each checksum
+		for _, cs := range spdxPkg.Checksums {
+			normalized := normalizeHashAlgorithm(cs.Algorithm)
+			if normalized == "" || cs.ChecksumValue == "" {
+				continue
+			}
+			hashes = append(hashes, models.PackageHash{
+				PackageId: p.ID,
+				Algorithm: normalized,
+				HashValue: cs.ChecksumValue,
+			})
+		}
+
 		packages = append(packages, p)
 	}
 
-	return packages, nil
+	return packages, hashes, nil
 }
 
-// extractCycloneDXPackages extracts package information from typed CycloneDX document
-func (r *SBOMRepository) extractCycloneDXPackages(doc CycloneDXDocument, sbomID uuid.UUID) ([]models.Package, error) {
+// extractCycloneDXPackages extracts package information and hashes from a typed CycloneDX document.
+// Returns the packages, their associated PackageHash records, and any error.
+// PackageHash records reference the Package by UUID assigned here; callers must ensure
+// packages are saved (to populate IDs) before saving hashes.
+func (r *SBOMRepository) extractCycloneDXPackages(doc CycloneDXDocument, sbomID uuid.UUID) ([]models.Package, []models.PackageHash, error) {
 	packages := make([]models.Package, 0, len(doc.Components))
+	var hashes []models.PackageHash
 
 	for _, comp := range doc.Components {
 		p := models.Package{
@@ -221,10 +312,28 @@ func (r *SBOMRepository) extractCycloneDXPackages(doc CycloneDXDocument, sbomID 
 			p.Description = &comp.Description
 		}
 
+		// Assign a UUID now so hashes can reference it before DB insert
+		if p.ID == uuid.Nil {
+			p.ID = uuid.New()
+		}
+
+		// Build PackageHash records for each hash entry
+		for _, h := range comp.Hashes {
+			normalized := normalizeHashAlgorithm(h.Alg)
+			if normalized == "" || h.Content == "" {
+				continue
+			}
+			hashes = append(hashes, models.PackageHash{
+				PackageId: p.ID,
+				Algorithm: normalized,
+				HashValue: h.Content,
+			})
+		}
+
 		packages = append(packages, p)
 	}
 
-	return packages, nil
+	return packages, hashes, nil
 }
 
 // GetSBOM retrieves an SBOM by ID with all related packages
