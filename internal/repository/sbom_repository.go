@@ -350,6 +350,19 @@ func (r *SBOMRepository) extractCycloneDXPackages(doc CycloneDXDocument, sbomID 
 	return packages, hashes, nil
 }
 
+// GetSBOMByNamespace retrieves an SBOM by its document namespace
+func (r *SBOMRepository) GetSBOMByNamespace(namespace string) (*models.SBOM, error) {
+	var sbom models.SBOM
+	err := r.db.Where("document_namespace = ?", namespace).First(&sbom).Error
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, ErrSBOMNotFound
+		}
+		return nil, fmt.Errorf("failed to get SBOM by namespace: %w", err)
+	}
+	return &sbom, nil
+}
+
 // GetSBOM retrieves an SBOM by ID with all related packages
 func (r *SBOMRepository) GetSBOM(ctx context.Context, id uuid.UUID) (*models.SBOM, error) {
 	var sbom models.SBOM
@@ -480,6 +493,38 @@ func (r *SBOMRepository) UpdateBSICompliance(id uuid.UUID, compliant bool, score
 		"bsi_score":      score,
 		"bsi_checked_at": now,
 	}).Error
+}
+
+// GetSBOMJSON retrieves just the raw SBOM JSON for a given ID (no associations loaded).
+func (r *SBOMRepository) GetSBOMJSON(id uuid.UUID) (string, error) {
+	var sbom models.SBOM
+	if err := r.db.Select("sbom_json").First(&sbom, "id = ?", id).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return "", ErrSBOMNotFound
+		}
+		return "", fmt.Errorf("failed to get SBOM JSON: %w", err)
+	}
+	jsonBytes, err := json.Marshal(sbom.SBOMJson)
+	if err != nil {
+		return "", fmt.Errorf("failed to marshal SBOM JSON: %w", err)
+	}
+	return string(jsonBytes), nil
+}
+
+// GetSBOMByPrefix finds a single SBOM matching an ID prefix (first 8+ chars of UUID).
+// Returns error if ambiguous (multiple matches) or not found.
+func (r *SBOMRepository) GetSBOMByPrefix(prefix string) (*models.SBOM, error) {
+	var sboms []models.SBOM
+	if err := r.db.Where("CAST(id AS TEXT) LIKE ?", prefix+"%").Limit(2).Find(&sboms).Error; err != nil {
+		return nil, fmt.Errorf("failed to search by prefix: %w", err)
+	}
+	if len(sboms) == 0 {
+		return nil, fmt.Errorf("no SBOM found with ID prefix %q", prefix)
+	}
+	if len(sboms) > 1 {
+		return nil, fmt.Errorf("ambiguous ID prefix %q matches multiple SBOMs", prefix)
+	}
+	return &sboms[0], nil
 }
 
 // SearchByPackage searches for packages by name across all SBOMs

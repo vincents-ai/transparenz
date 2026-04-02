@@ -307,9 +307,54 @@ var deleteCmd = &cobra.Command{
 	},
 }
 
+var exportCmd = &cobra.Command{
+	Use:   "export <id>",
+	Short: "Export stored SBOM JSON from the database",
+	Long:  "Retrieve a stored SBOM's raw JSON from the database by full UUID or 8-character prefix.",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		db, err := database.Connect()
+		if err != nil {
+			return fmt.Errorf("failed to connect to database: %w", err)
+		}
+		defer database.Close(db)
+
+		repo := repository.NewSBOMRepository(db)
+
+		var sbomID uuid.UUID
+		if parsed, parseErr := uuid.Parse(args[0]); parseErr == nil {
+			sbomID = parsed
+		} else {
+			sbom, findErr := repo.GetSBOMByPrefix(args[0])
+			if findErr != nil {
+				return fmt.Errorf("failed to resolve SBOM ID: %w", findErr)
+			}
+			sbomID = sbom.ID
+		}
+
+		jsonStr, err := repo.GetSBOMJSON(sbomID)
+		if err != nil {
+			return fmt.Errorf("failed to get SBOM JSON: %w", err)
+		}
+
+		outputPath, _ := cmd.Flags().GetString("output")
+		if outputPath != "" {
+			if err := os.WriteFile(outputPath, []byte(jsonStr), 0644); err != nil {
+				return fmt.Errorf("failed to write output file: %w", err)
+			}
+		} else {
+			fmt.Print(jsonStr)
+		}
+
+		fmt.Fprintf(os.Stderr, "Exported SBOM %s\n", sbomID)
+		return nil
+	},
+}
+
 func init() {
 	rootCmd.AddCommand(dbCmd)
 	dbCmd.AddCommand(dbMigrateCmd)
+	dbCmd.AddCommand(exportCmd)
 
 	rootCmd.AddCommand(listCmd)
 	rootCmd.AddCommand(showCmd)
@@ -323,4 +368,7 @@ func init() {
 
 	// Add flags for delete command
 	deleteCmd.Flags().BoolP("force", "f", false, "Force deletion without confirmation")
+
+	// Add flags for export command
+	exportCmd.Flags().StringP("output", "o", "", "Output file path (stdout if unset)")
 }
