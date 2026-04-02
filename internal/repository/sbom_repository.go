@@ -83,11 +83,9 @@ func (r *SBOMRepository) SaveSBOM(ctx context.Context, sbomJSON string, sourcePa
 		documentNamespace = spdxDoc.DocumentNamespace
 		name = spdxDoc.Name
 
-		// Extract version from documentDescribes if available
-		if len(spdxDoc.DocumentDescribes) > 0 {
-			version = spdxDoc.DocumentDescribes[0]
-		} else {
-			version = "1.0"
+		// Extract component version from the first package entry
+		if len(spdxDoc.Packages) > 0 {
+			version = spdxDoc.Packages[0].VersionInfo
 		}
 
 		// Extract generation timestamp from creationInfo.created
@@ -227,12 +225,28 @@ func (r *SBOMRepository) extractSPDXPackages(doc SPDXDocument, sbomID uuid.UUID)
 			}
 		}
 
-		if spdxPkg.LicenseConcluded != "" && spdxPkg.LicenseConcluded != "NOASSERTION" {
-			p.License = &spdxPkg.LicenseConcluded
+		// Use licenseConcluded, falling back to licenseDeclared if absent or non-informative
+		license := spdxPkg.LicenseConcluded
+		if license == "" || license == "NOASSERTION" || license == "NONE" {
+			license = spdxPkg.LicenseDeclared
+		}
+		if license == "NOASSERTION" || license == "NONE" {
+			license = ""
+		}
+		if license != "" {
+			p.License = &license
 		}
 
-		if spdxPkg.Supplier != "" && spdxPkg.Supplier != "NOASSERTION" {
-			p.Supplier = &spdxPkg.Supplier
+		// Use supplier, falling back to originator if absent or non-informative
+		supplier := spdxPkg.Supplier
+		if supplier == "" || supplier == "NOASSERTION" {
+			supplier = spdxPkg.Originator
+		}
+		if supplier == "NOASSERTION" {
+			supplier = ""
+		}
+		if supplier != "" {
+			p.Supplier = &supplier
 		}
 
 		if spdxPkg.DownloadLocation != "" && spdxPkg.DownloadLocation != "NOASSERTION" {
