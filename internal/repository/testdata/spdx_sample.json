@@ -1,0 +1,70 @@
+{
+  "spdxVersion": "SPDX-2.3",
+  "dataLicense": "CC0-1.0",
+  "SPDXID": "SPDXRef-DOCUMENT",
+  "name": "test-project",
+  "documentNamespace": "https://example.org/test-project",
+  "documentDescribes": ["SPDXRef-Package-main"],
+  "creationInfo": {
+    "created": "2024-01-15T10:00:00Z",
+    "creators": ["Tool: test-generator/1.0"]
+  },
+  "packages": [
+    {
+      "SPDXID": "SPDXRef-Package-main",
+      "name": "test-project",
+      "versionInfo": "1.0.0",
+      "licenseConcluded": "MIT",
+      "licenseDeclared": "MIT",
+      "supplier": "Test Supplier",
+      "downloadLocation": "https://example.com/test-project",
+      "description": "Main test project package",
+      "checksums": [
+        {
+          "algorithm": "SHA256",
+          "checksumValue": "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2"
+        },
+        {
+          "algorithm": "SHA1",
+          "checksumValue": "da39a3ee5e6b4b0d3255bfef95601890afd80709"
+        }
+      ],
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE_MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:golang/test-project@1.0.0"
+        },
+        {
+          "referenceCategory": "SECURITY",
+          "referenceType": "cpe23Type",
+          "referenceLocator": "cpe:2.3:a:test:test-project:1.0.0:*:*:*:*:*:*:*"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-Package-dep1",
+      "name": "dependency-one",
+      "versionInfo": "2.5.0",
+      "licenseConcluded": "Apache-2.0",
+      "licenseDeclared": "Apache-2.0",
+      "supplier": "Dependency Supplier",
+      "downloadLocation": "https://example.com/dep1",
+      "description": "First dependency",
+      "checksums": [
+        {
+          "algorithm": "MD5",
+          "checksumValue": "d41d8cd98f00b204e9800998ecf8427e"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-Package-dep2",
+      "name": "dependency-two",
+      "versionInfo": "3.0.0",
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "NOASSERTION",
+      "downloadLocation": "NOASSERTION"
+    }
+  ]
+}

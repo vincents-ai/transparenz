@@ -1,0 +1,81 @@
+{
+  "bomFormat": "CycloneDX",
+  "specVersion": "1.5",
+  "serialNumber": "urn:uuid:550e8400-e29b-41d4-a716-446655440000",
+  "version": 1,
+  "metadata": {
+    "timestamp": "2024-01-15T10:00:00Z",
+    "tools": [
+      {
+        "vendor": "Test",
+        "name": "test-generator",
+        "version": "1.0.0"
+      }
+    ],
+    "component": {
+      "type": "application",
+      "name": "test-project",
+      "version": "1.0.0",
+      "purl": "pkg:golang/test-project@1.0.0"
+    }
+  },
+  "components": [
+    {
+      "type": "application",
+      "name": "test-project",
+      "version": "1.0.0",
+      "purl": "pkg:golang/test-project@1.0.0",
+      "cpe": "cpe:2.3:a:test:test-project:1.0.0:*:*:*:*:*:*:*",
+      "description": "Main test project",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2"
+        },
+        {
+          "alg": "SHA-512",
+          "content": "cf83e1357eefb8bdf1542850d66d8007d620e4050b5715dc83f4a921d36ce9ce47d0d13c5d85f2b0ff8318d2877eec2f63b931bd47417a81a538327af927da3e"
+        }
+      ],
+      "supplier": {
+        "name": "Test Supplier"
+      }
+    },
+    {
+      "type": "library",
+      "name": "dependency-one",
+      "version": "2.5.0",
+      "purl": "pkg:npm/dependency-one@2.5.0",
+      "description": "First dependency",
+      "licenses": [
+        {
+          "license": {
+            "name": "Apache-2.0"
+          }
+        }
+      ],
+      "hashes": [
+        {
+          "alg": "MD5",
+          "content": "d41d8cd98f00b204e9800998ecf8427e"
+        }
+      ],
+      "supplier": {
+        "name": "Dependency Supplier"
+      }
+    },
+    {
+      "type": "library",
+      "name": "dependency-two",
+      "version": "3.0.0",
+      "purl": "pkg:pypi/dependency-two@3.0.0"
+    }
+  ]
+}
