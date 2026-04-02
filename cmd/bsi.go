@@ -28,7 +28,7 @@ Validates:
   - Supplier coverage (supplier/author information for all components)
   - Component properties (executable, archive, structured per TR-03183-2 Section 4.1)
   - Dependency completeness (explicit completeness assertion per TR-03183-2 Section 4.2)
-  - Format version (CycloneDX 1.6+ or SPDX 3.0.1+ required for CRA/BSI extensions)
+  - Format version (CycloneDX 1.6+ or SPDX 2.3+ required for CRA/BSI extensions)
 
 Outputs a compliance report with:
   - Overall compliance percentage
@@ -96,7 +96,7 @@ Example usage:
 		if formatVer, ok := report["format_version"].(string); ok {
 			fmt.Fprintf(os.Stderr, "Format Version: %s\n", formatVer)
 			if compliant, ok := report["format_compliant"].(bool); ok && !compliant {
-				fmt.Fprintf(os.Stderr, "  WARNING: Format version does not meet minimum requirements (CycloneDX 1.6+ or SPDX 3.0.1+)\n")
+				fmt.Fprintf(os.Stderr, "  WARNING: Format version does not meet minimum requirements (CycloneDX 1.6+ or SPDX 2.3+)\n")
 			}
 		}
 
@@ -179,16 +179,17 @@ func validateBSICompliance(sbomData map[string]interface{}) map[string]interface
 	} else if format == "SPDX" {
 		if spdxVer, ok := sbomData["spdxVersion"].(string); ok {
 			formatVersion = spdxVer
-			// Check if version is 3.0.1 or higher
+			// Check if version is 2.3 or higher (SPDX 2.3 is the current industry standard;
+			// SPDX 3.0 was released in 2024 but is not yet widely supported)
 			verStr := strings.TrimPrefix(spdxVer, "SPDX-")
-			if !isVersionGTE(verStr, "3.0.1") {
+			if !isVersionGTE(verStr, "2.3") {
 				formatCompliant = false
 				findings = append(findings, BSIFinding{
-					Severity:    "CRITICAL",
+					Severity:    "WARNING",
 					Category:    "Format Version",
-					Message:     fmt.Sprintf("SPDX version %s is below minimum required 3.0.1 for CRA/BSI extensions", spdxVer),
+					Message:     fmt.Sprintf("SPDX version %s is below minimum recommended 2.3", spdxVer),
 					Component:   "SBOM Document",
-					Remediation: "Regenerate SBOM with SPDX 3.0.1+ format",
+					Remediation: "Regenerate SBOM with SPDX 2.3+ format",
 				})
 			}
 		}
@@ -254,17 +255,30 @@ func validateBSICompliance(sbomData map[string]interface{}) map[string]interface
 							if content, ok := hMap["content"].(string); ok {
 								// Check SHA-512
 								if alg == "SHA-512" {
-									decoded, err := base64.StdEncoding.DecodeString(content)
-									if err == nil && sha512Regex.MatchString(hex.EncodeToString(decoded)) {
+									// Primary: content is a 128-char hex string (written by enricher via hex.EncodeToString)
+									if sha512Regex.MatchString(content) {
 										hasSha512 = true
 										hasAnyHash = true
+									} else {
+										// Fallback: base64-encoded raw bytes (SBOMs from other tools)
+										decoded, err := base64.StdEncoding.DecodeString(content)
+										if err == nil && sha512Regex.MatchString(hex.EncodeToString(decoded)) {
+											hasSha512 = true
+											hasAnyHash = true
+										}
 									}
 								}
 								// Check SHA-256
 								if alg == "SHA-256" {
-									decoded, err := base64.StdEncoding.DecodeString(content)
-									if err == nil && sha256Regex.MatchString(hex.EncodeToString(decoded)) {
+									// Primary: content is a 64-char hex string
+									if sha256Regex.MatchString(content) {
 										hasAnyHash = true
+									} else {
+										// Fallback: base64-encoded raw bytes
+										decoded, err := base64.StdEncoding.DecodeString(content)
+										if err == nil && sha256Regex.MatchString(hex.EncodeToString(decoded)) {
+											hasAnyHash = true
+										}
 									}
 								}
 							}
@@ -292,7 +306,7 @@ func validateBSICompliance(sbomData map[string]interface{}) map[string]interface
 				Category:    "Hashes",
 				Message:     "No cryptographic hash found (SHA-512 required per BSI TR-03183-2)",
 				Component:   pkgID,
-				Remediation: "Run 'transparenz generate --bsi-compliant' to add SHA-512 hashes",
+				Remediation: "Run 'transparenz generate --bsi-compliant --binary <path>' or 'transparenz enrich --artifacts <dir>' to add SHA-512 hashes",
 			})
 		}
 
