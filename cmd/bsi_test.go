@@ -350,6 +350,37 @@ func TestValidateBSICompliance_SPDX23Accepted(t *testing.T) {
 }
 
 // --------------------------------------------------------------------------
+// TestRunBSICheck_ReturnsParsedScore
+// --------------------------------------------------------------------------
+
+func TestRunBSICheck_ReturnsParsedScore(t *testing.T) {
+	// Use the same fully compliant CycloneDX 1.6 fixture from other tests.
+	sbomJSON := strings.ReplaceAll(fullyCompliantCycloneDXJSON, "PLACEHOLDER_SHA512", validSHA512)
+
+	compliant, score, err := RunBSICheck(sbomJSON)
+	if err != nil {
+		t.Fatalf("RunBSICheck returned unexpected error: %v", err)
+	}
+	if !compliant {
+		t.Error("expected compliant=true for fully-compliant SBOM")
+	}
+	if score < 0.9 || score > 1.0 {
+		t.Errorf("expected score in [0.9, 1.0], got %.4f", score)
+	}
+}
+
+// --------------------------------------------------------------------------
+// TestRunBSICheck_EmptyJSON
+// --------------------------------------------------------------------------
+
+func TestRunBSICheck_EmptyJSON(t *testing.T) {
+	_, _, err := RunBSICheck("")
+	if err == nil {
+		t.Fatal("expected error for empty JSON")
+	}
+}
+
+// --------------------------------------------------------------------------
 // TestValidateBSICompliance_ScoreWeighting
 // --------------------------------------------------------------------------
 

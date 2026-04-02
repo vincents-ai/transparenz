@@ -17,6 +17,25 @@ var (
 	bsiOutput string
 )
 
+// RunBSICheck runs BSI compliance validation on an SBOM JSON string and returns
+// (compliant bool, score float64 0.0-1.0, err error).
+// This allows programmatic use from other commands without spawning a subprocess.
+func RunBSICheck(sbomJSON string) (compliant bool, score float64, err error) {
+	if strings.TrimSpace(sbomJSON) == "" {
+		return false, 0.0, fmt.Errorf("empty SBOM JSON")
+	}
+	var sbomData map[string]interface{}
+	if err := json.Unmarshal([]byte(sbomJSON), &sbomData); err != nil {
+		return false, 0.0, fmt.Errorf("failed to parse SBOM JSON: %w", err)
+	}
+	report := validateBSICompliance(sbomData)
+
+	compliantVal, _ := report["compliant"].(bool)
+	scoreVal, _ := report["overall_score"].(float64)
+
+	return compliantVal, scoreVal / 100.0, nil
+}
+
 var bsiCmd = &cobra.Command{
 	Use:   "bsi-check [sbom-path]",
 	Short: "Validate SBOM compliance with BSI TR-03183-2 standard",
