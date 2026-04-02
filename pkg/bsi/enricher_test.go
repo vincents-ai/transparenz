@@ -1318,3 +1318,200 @@ func TestLoadGoSum(t *testing.T) {
 func contains(s, substr string) bool {
 	return strings.Contains(s, substr)
 }
+
+// TestInjectManufacturer_CycloneDX verifies that CycloneDX SBOMs receive
+// metadata.manufacturer with name and url fields per BSI TR-03183-2.
+func TestInjectManufacturer_CycloneDX(t *testing.T) {
+	enricher := NewEnricher(".")
+
+	sbomJSON := `{
+		"bomFormat": "CycloneDX",
+		"specVersion": "1.6",
+		"metadata": {},
+		"components": []
+	}`
+
+	result, err := enricher.InjectManufacturer(sbomJSON, "Acme Corp", "https://acme.example.com")
+	if err != nil {
+		t.Fatalf("InjectManufacturer failed: %v", err)
+	}
+
+	var parsed map[string]interface{}
+	if err := json.Unmarshal([]byte(result), &parsed); err != nil {
+		t.Fatalf("Failed to parse result: %v", err)
+	}
+
+	metadata, ok := parsed["metadata"].(map[string]interface{})
+	if !ok {
+		t.Fatal("metadata must be a map")
+	}
+
+	manufacturer, ok := metadata["manufacturer"].(map[string]interface{})
+	if !ok {
+		t.Fatal("metadata.manufacturer must be present and be a map")
+	}
+
+	if manufacturer["name"] != "Acme Corp" {
+		t.Errorf("Expected manufacturer.name 'Acme Corp', got %v", manufacturer["name"])
+	}
+
+	urls, ok := manufacturer["url"].([]interface{})
+	if !ok || len(urls) == 0 {
+		t.Fatal("manufacturer.url must be a non-empty array")
+	}
+	if urls[0] != "https://acme.example.com" {
+		t.Errorf("Expected manufacturer.url[0] 'https://acme.example.com', got %v", urls[0])
+	}
+}
+
+// TestInjectManufacturer_CycloneDX_NoMetadata verifies that metadata is created
+// when it does not already exist in the CycloneDX SBOM.
+func TestInjectManufacturer_CycloneDX_NoMetadata(t *testing.T) {
+	enricher := NewEnricher(".")
+
+	sbomJSON := `{
+		"bomFormat": "CycloneDX",
+		"specVersion": "1.6",
+		"components": []
+	}`
+
+	result, err := enricher.InjectManufacturer(sbomJSON, "Test Org", "https://test.org")
+	if err != nil {
+		t.Fatalf("InjectManufacturer failed: %v", err)
+	}
+
+	var parsed map[string]interface{}
+	if err := json.Unmarshal([]byte(result), &parsed); err != nil {
+		t.Fatalf("Failed to parse result: %v", err)
+	}
+
+	metadata, ok := parsed["metadata"].(map[string]interface{})
+	if !ok {
+		t.Fatal("metadata must be created and be a map")
+	}
+	if _, ok := metadata["manufacturer"]; !ok {
+		t.Fatal("metadata.manufacturer must be injected when metadata has no manufacturer")
+	}
+}
+
+// TestInjectManufacturer_SPDX verifies that SPDX SBOMs receive a document-level
+// REVIEW annotation carrying the producer identity per BSI TR-03183-2.
+func TestInjectManufacturer_SPDX(t *testing.T) {
+	enricher := NewEnricher(".")
+
+	sbomJSON := `{
+		"spdxVersion": "SPDX-2.3",
+		"packages": []
+	}`
+
+	result, err := enricher.InjectManufacturer(sbomJSON, "Widgets GmbH", "https://widgets.de")
+	if err != nil {
+		t.Fatalf("InjectManufacturer failed: %v", err)
+	}
+
+	var parsed map[string]interface{}
+	if err := json.Unmarshal([]byte(result), &parsed); err != nil {
+		t.Fatalf("Failed to parse result: %v", err)
+	}
+
+	annotations, ok := parsed["annotations"].([]interface{})
+	if !ok || len(annotations) == 0 {
+		t.Fatal("Expected document-level annotations to be added for SPDX")
+	}
+
+	// Find the producer annotation
+	found := false
+	for _, ann := range annotations {
+		annMap, ok := ann.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		if annMap["annotationType"] == "REVIEW" &&
+			annMap["annotator"] == "Tool: transparenz" &&
+			strings.Contains(annMap["comment"].(string), "SBOM-Producer: Widgets GmbH https://widgets.de") &&
+			annMap["annotationDate"] != "" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("Expected REVIEW annotation with SBOM-Producer comment, got: %v", annotations)
+	}
+}
+
+// TestInjectManufacturer_EmptyName verifies that an empty name causes the function
+// to return the original SBOM unchanged (silent skip).
+func TestInjectManufacturer_EmptyName(t *testing.T) {
+	enricher := NewEnricher(".")
+
+	sbomJSON := `{
+		"bomFormat": "CycloneDX",
+		"specVersion": "1.6",
+		"metadata": {},
+		"components": []
+	}`
+
+	result, err := enricher.InjectManufacturer(sbomJSON, "", "https://ignored.com")
+	if err != nil {
+		t.Fatalf("InjectManufacturer with empty name should not error: %v", err)
+	}
+
+	// Result must be valid JSON and must NOT contain manufacturer
+	var parsed map[string]interface{}
+	if err := json.Unmarshal([]byte(result), &parsed); err != nil {
+		t.Fatalf("Result must be valid JSON: %v", err)
+	}
+
+	if metadata, ok := parsed["metadata"].(map[string]interface{}); ok {
+		if _, hasManufacturer := metadata["manufacturer"]; hasManufacturer {
+			t.Error("manufacturer must not be injected when name is empty")
+		}
+	}
+}
+
+// TestInjectManufacturer_InvalidJSON verifies that an error is returned
+// for malformed input.
+func TestInjectManufacturer_InvalidJSON(t *testing.T) {
+	enricher := NewEnricher(".")
+
+	_, err := enricher.InjectManufacturer("not valid json", "Acme", "https://acme.com")
+	if err == nil {
+		t.Error("Expected error for invalid JSON input")
+	}
+}
+
+// TestInjectManufacturer_CycloneDX_URLEmpty verifies that an empty URL is handled
+// gracefully (url array omitted or empty).
+func TestInjectManufacturer_CycloneDX_URLEmpty(t *testing.T) {
+	enricher := NewEnricher(".")
+
+	sbomJSON := `{
+		"bomFormat": "CycloneDX",
+		"specVersion": "1.6",
+		"metadata": {},
+		"components": []
+	}`
+
+	result, err := enricher.InjectManufacturer(sbomJSON, "NoURL Corp", "")
+	if err != nil {
+		t.Fatalf("InjectManufacturer failed: %v", err)
+	}
+
+	var parsed map[string]interface{}
+	if err := json.Unmarshal([]byte(result), &parsed); err != nil {
+		t.Fatalf("Failed to parse result: %v", err)
+	}
+
+	metadata := parsed["metadata"].(map[string]interface{})
+	manufacturer := metadata["manufacturer"].(map[string]interface{})
+
+	if manufacturer["name"] != "NoURL Corp" {
+		t.Errorf("Expected manufacturer.name 'NoURL Corp', got %v", manufacturer["name"])
+	}
+	// url should be absent or empty when not provided
+	if urls, ok := manufacturer["url"]; ok {
+		if urlSlice, ok := urls.([]interface{}); ok && len(urlSlice) > 0 {
+			t.Errorf("Expected no urls when url param is empty, got %v", urlSlice)
+		}
+	}
+}

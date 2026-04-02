@@ -975,6 +975,85 @@ func (e *Enricher) enrichSPDXWithArtifactHashes(packages []interface{}, artifact
 	return nil
 }
 
+// InjectManufacturer injects the SBOM-producing organisation's identity
+// into CycloneDX metadata.manufacturer and SPDX document-level annotation.
+//
+// For CycloneDX SBOMs the following structure is injected into metadata:
+//
+//	"manufacturer": {
+//	  "name": "<name>",
+//	  "url": ["<url>"]   // omitted when url is empty
+//	}
+//
+// For SPDX SBOMs a document-level annotation of type "REVIEW" is appended:
+//
+//	{
+//	  "annotationType": "REVIEW",
+//	  "annotator":      "Tool: transparenz",
+//	  "annotationDate": "<RFC3339>",
+//	  "comment":        "SBOM-Producer: <name> <url>"
+//	}
+//
+// When name is empty the function returns the input SBOM unchanged (silent skip).
+func (e *Enricher) InjectManufacturer(sbomJSON string, name, url string) (string, error) {
+	// Silent skip when no name is provided.
+	if name == "" {
+		return sbomJSON, nil
+	}
+
+	var sbomData map[string]interface{}
+	if err := json.Unmarshal([]byte(sbomJSON), &sbomData); err != nil {
+		return "", fmt.Errorf("InjectManufacturer: failed to parse SBOM: %w", err)
+	}
+
+	// Determine format by the presence of "bomFormat": "CycloneDX"
+	if bomFormat, ok := sbomData["bomFormat"].(string); ok && bomFormat == "CycloneDX" {
+		e.injectManufacturerCycloneDX(sbomData, name, url)
+	} else {
+		e.injectManufacturerSPDX(sbomData, name, url)
+	}
+
+	enriched, err := json.MarshalIndent(sbomData, "", "  ")
+	if err != nil {
+		return "", fmt.Errorf("InjectManufacturer: failed to marshal SBOM: %w", err)
+	}
+	return string(enriched), nil
+}
+
+// injectManufacturerCycloneDX sets metadata.manufacturer in a CycloneDX SBOM map.
+func (e *Enricher) injectManufacturerCycloneDX(sbomData map[string]interface{}, name, url string) {
+	metadata, ok := sbomData["metadata"].(map[string]interface{})
+	if !ok {
+		metadata = map[string]interface{}{}
+		sbomData["metadata"] = metadata
+	}
+
+	manufacturer := map[string]interface{}{
+		"name": name,
+	}
+	if url != "" {
+		manufacturer["url"] = []interface{}{url}
+	}
+	metadata["manufacturer"] = manufacturer
+}
+
+// injectManufacturerSPDX appends a document-level REVIEW annotation to an SPDX SBOM map.
+func (e *Enricher) injectManufacturerSPDX(sbomData map[string]interface{}, name, url string) {
+	annotations, ok := sbomData["annotations"].([]interface{})
+	if !ok {
+		annotations = []interface{}{}
+	}
+
+	comment := fmt.Sprintf("SBOM-Producer: %s %s", name, url)
+	annotations = append(annotations, map[string]interface{}{
+		"annotationType": "REVIEW",
+		"annotator":      "Tool: transparenz",
+		"annotationDate": time.Now().UTC().Format(time.RFC3339),
+		"comment":        strings.TrimSpace(comment),
+	})
+	sbomData["annotations"] = annotations
+}
+
 // getString safely extracts string value from map
 func getString(m map[string]interface{}, key string) string {
 	if val, ok := m[key].(string); ok {

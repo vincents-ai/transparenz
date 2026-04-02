@@ -12,8 +12,10 @@ import (
 )
 
 var (
-	enrichOutput    string
-	enrichArtifacts string
+	enrichOutput          string
+	enrichArtifacts       string
+	enrichManufacturer    string
+	enrichManufacturerURL string
 )
 
 var enrichCmd = &cobra.Command{
@@ -110,6 +112,26 @@ Example usage:
 			return fmt.Errorf("failed to marshal enriched SBOM: %w", err)
 		}
 
+		// Inject SBOM producer identity (BSI TR-03183-2: metadata.manufacturer)
+		mfr := enrichManufacturer
+		if mfr == "" {
+			mfr = os.Getenv("TRANSPARENZ_MANUFACTURER")
+		}
+		mfrURL := enrichManufacturerURL
+		if mfrURL == "" {
+			mfrURL = os.Getenv("TRANSPARENZ_MANUFACTURER_URL")
+		}
+		outputStr := string(output)
+		if mfr != "" {
+			outputStr, err = enricher.InjectManufacturer(outputStr, mfr, mfrURL)
+			if err != nil {
+				return fmt.Errorf("failed to inject manufacturer: %w", err)
+			}
+			if verbose {
+				fmt.Fprintf(os.Stderr, "Manufacturer identity injected: %s\n", mfr)
+			}
+		}
+
 		// Write output
 		if enrichOutput != "" {
 			absPath, err := filepath.Abs(enrichOutput)
@@ -117,13 +139,13 @@ Example usage:
 				return fmt.Errorf("failed to resolve output path: %w", err)
 			}
 
-			if err := os.WriteFile(absPath, output, 0644); err != nil {
+			if err := os.WriteFile(absPath, []byte(outputStr), 0644); err != nil {
 				return fmt.Errorf("failed to write output: %w", err)
 			}
 
 			fmt.Printf("Enriched SBOM written to %s\n", absPath)
 		} else {
-			fmt.Println(string(output))
+			fmt.Println(outputStr)
 		}
 
 		// Print summary
@@ -133,6 +155,9 @@ Example usage:
 		fmt.Fprintf(os.Stderr, "Dependency completeness: asserted (complete, transitive)\n")
 		if enrichArtifacts != "" {
 			fmt.Fprintf(os.Stderr, "SHA-512 artifact hashes: computed from %s\n", enrichArtifacts)
+		}
+		if mfr != "" {
+			fmt.Fprintf(os.Stderr, "Manufacturer: %s\n", mfr)
 		}
 		fmt.Fprintf(os.Stderr, "Spec version: CycloneDX 1.6\n")
 
@@ -145,4 +170,6 @@ func init() {
 
 	enrichCmd.Flags().StringVarP(&enrichOutput, "output", "o", "", "Output file path (default: stdout)")
 	enrichCmd.Flags().StringVar(&enrichArtifacts, "artifacts", "", "Directory containing compiled binaries for SHA-512 hash computation")
+	enrichCmd.Flags().StringVar(&enrichManufacturer, "manufacturer", "", "SBOM producer organisation name (BSI TR-03183-2, also env: TRANSPARENZ_MANUFACTURER)")
+	enrichCmd.Flags().StringVar(&enrichManufacturerURL, "manufacturer-url", "", "SBOM producer organisation URL (also env: TRANSPARENZ_MANUFACTURER_URL)")
 }

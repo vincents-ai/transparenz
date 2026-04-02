@@ -16,10 +16,12 @@ import (
 )
 
 var (
-	generateFormat       string
-	generateOutput       string
-	generateSave         bool
-	generateBSICompliant bool
+	generateFormat          string
+	generateOutput          string
+	generateSave            bool
+	generateBSICompliant    bool
+	generateManufacturer    string
+	generateManufacturerURL string
 )
 
 var generateCmd = &cobra.Command{
@@ -89,6 +91,25 @@ Example usage:
 			output, err = enricher.EnrichSBOM(output)
 			if err != nil {
 				return fmt.Errorf("failed to enrich SBOM: %w", err)
+			}
+
+			// Inject SBOM producer identity (BSI TR-03183-2: metadata.manufacturer)
+			mfr := generateManufacturer
+			if mfr == "" {
+				mfr = os.Getenv("TRANSPARENZ_MANUFACTURER")
+			}
+			mfrURL := generateManufacturerURL
+			if mfrURL == "" {
+				mfrURL = os.Getenv("TRANSPARENZ_MANUFACTURER_URL")
+			}
+			if mfr != "" {
+				output, err = enricher.InjectManufacturer(output, mfr, mfrURL)
+				if err != nil {
+					return fmt.Errorf("failed to inject manufacturer: %w", err)
+				}
+				if verbose {
+					fmt.Fprintf(os.Stderr, "Manufacturer identity injected: %s\n", mfr)
+				}
 			}
 
 			if verbose {
@@ -161,4 +182,6 @@ func init() {
 	generateCmd.Flags().StringVarP(&generateOutput, "output", "o", "", "Output file path (default: stdout)")
 	generateCmd.Flags().BoolVar(&generateSave, "save", false, "Save SBOM to database")
 	generateCmd.Flags().BoolVarP(&generateBSICompliant, "bsi-compliant", "b", false, "Generate BSI TR-03183 compliant SBOM (adds hashes, licenses, suppliers)")
+	generateCmd.Flags().StringVar(&generateManufacturer, "manufacturer", "", "SBOM producer organisation name (BSI TR-03183-2, also env: TRANSPARENZ_MANUFACTURER)")
+	generateCmd.Flags().StringVar(&generateManufacturerURL, "manufacturer-url", "", "SBOM producer organisation URL (also env: TRANSPARENZ_MANUFACTURER_URL)")
 }
