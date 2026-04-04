@@ -44,8 +44,8 @@ test-coverage: ## Run tests and report coverage
 test-coverage-html: test-coverage ## Open coverage report in browser
 	go tool cover -html=coverage.out
 
-test-100: ## Run SBOM generation against 100 open-source projects
-	cd scripts && bash sbom-100-projects.sh
+test-100: build ## Run SBOM generation against 100 open-source projects
+	bash scripts/sbom-100-projects.sh --binary ./build/transparenz --output test-results/sbom-100
 
 compare: ## Compare generated SBOMs against upstream references
 	python3 scripts/compare-sboms.py

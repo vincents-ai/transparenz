@@ -204,6 +204,11 @@ FAIL=0
 SKIP=0
 TOTAL=${#PROJECTS[@]}
 
+# ── Write project list to temp file for xargs ────────────────────────────────
+WORK_FILE="$(mktemp)"
+trap 'rm -f "$WORK_FILE"' EXIT
+printf '%s\n' "${PROJECTS[@]}" > "$WORK_FILE"
+
 echo -e "${BOLD}transparenz SBOM generation — ${TOTAL} projects${RESET}"
 echo -e "Binary : $BINARY"
 echo -e "Output : $OUTPUT_DIR"
@@ -318,8 +323,6 @@ export LARGE_REPOS_STR
 # xargs calls process_project with each entry; output goes directly to terminal
 # (no subshell buffering) so progress is visible in real time.
 xargs -a "$WORK_FILE" -d '\n' -P "$JOBS" -I {} bash -c 'process_project "$@"' _ {}
-
-rm -f "$WORK_FILE"
 
 # ── Tally results from TSV (skip header line) ─────────────────────────────────
 while IFS=$'\t' read -r slug status _rest; do
