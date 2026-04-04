@@ -3,6 +3,7 @@ package sbom
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -16,6 +17,19 @@ import (
 	"github.com/anchore/syft/syft/sbom"
 	"github.com/anchore/syft/syft/source"
 )
+
+// ValidScopes lists the accepted values for the --scope flag.
+var ValidScopes = []string{"source", "binary"}
+
+// IsValidScope returns true if s is an accepted scope value.
+func IsValidScope(s string) bool {
+	for _, v := range ValidScopes {
+		if s == v {
+			return true
+		}
+	}
+	return false
+}
 
 // Generator wraps native Syft library for SBOM generation
 type Generator struct {
@@ -92,6 +106,106 @@ func (g *Generator) Generate(ctx context.Context, sourcePath string, format stri
 	}
 
 	return result, nil
+}
+
+// GenerateWithScope creates an SBOM from a source path and then injects the
+// transparenz:scope property/comment into the output document.  scope must be
+// one of ValidScopes ("source" or "binary").  An empty scope is treated the
+// same as "source".
+func (g *Generator) GenerateWithScope(ctx context.Context, sourcePath, format, scope string) (string, error) {
+	output, err := g.Generate(ctx, sourcePath, format)
+	if err != nil {
+		return "", err
+	}
+	if scope == "" {
+		scope = "source"
+	}
+	output, err = InjectScope(output, format, scope)
+	if err != nil {
+		// Non-fatal: log but return the unmodified SBOM rather than failing.
+		if g.verbose {
+			fmt.Fprintf(os.Stderr, "warning: could not inject scope annotation: %v\n", err)
+		}
+	}
+	return output, nil
+}
+
+// InjectScope post-processes a serialised SBOM JSON string and adds a
+// transparenz:scope annotation:
+//
+//   - CycloneDX: adds {"name":"transparenz:scope","value":"<scope>"} to
+//     metadata.properties (creating the array if absent).
+//   - SPDX JSON: prepends "transparenz:scope=<scope>\n" to documentComment.
+//
+// format should be "spdx" / "spdx-json" or "cyclonedx" / "cyclonedx-json".
+// The raw JSON string is returned unchanged on any parse error.
+func InjectScope(sbomJSON, format, scope string) (string, error) {
+	var doc map[string]interface{}
+	if err := json.Unmarshal([]byte(sbomJSON), &doc); err != nil {
+		return sbomJSON, fmt.Errorf("failed to parse SBOM JSON for scope injection: %w", err)
+	}
+
+	switch {
+	case strings.HasPrefix(format, "cyclonedx"):
+		injectScopeCycloneDX(doc, scope)
+	case strings.HasPrefix(format, "spdx"):
+		injectScopeSPDX(doc, scope)
+	default:
+		return sbomJSON, fmt.Errorf("unsupported format for scope injection: %s", format)
+	}
+
+	out, err := json.Marshal(doc)
+	if err != nil {
+		return sbomJSON, fmt.Errorf("failed to re-serialise SBOM after scope injection: %w", err)
+	}
+	return string(out), nil
+}
+
+// injectScopeCycloneDX adds transparenz:scope to metadata.properties.
+func injectScopeCycloneDX(doc map[string]interface{}, scope string) {
+	meta, ok := doc["metadata"].(map[string]interface{})
+	if !ok {
+		meta = make(map[string]interface{})
+		doc["metadata"] = meta
+	}
+
+	prop := map[string]interface{}{
+		"name":  "transparenz:scope",
+		"value": scope,
+	}
+
+	existing, _ := meta["properties"].([]interface{})
+	// Remove any pre-existing transparenz:scope entry to avoid duplicates
+	filtered := make([]interface{}, 0, len(existing)+1)
+	for _, p := range existing {
+		if pm, ok := p.(map[string]interface{}); ok {
+			if pm["name"] == "transparenz:scope" {
+				continue
+			}
+		}
+		filtered = append(filtered, p)
+	}
+	meta["properties"] = append(filtered, prop)
+}
+
+// injectScopeSPDX prepends transparenz:scope=<scope> to documentComment.
+func injectScopeSPDX(doc map[string]interface{}, scope string) {
+	annotation := fmt.Sprintf("transparenz:scope=%s", scope)
+	existing, _ := doc["documentComment"].(string)
+	if existing == "" {
+		doc["documentComment"] = annotation
+	} else if !strings.Contains(existing, "transparenz:scope=") {
+		doc["documentComment"] = annotation + "\n" + existing
+	} else {
+		// Replace existing annotation
+		lines := strings.Split(existing, "\n")
+		for i, l := range lines {
+			if strings.HasPrefix(l, "transparenz:scope=") {
+				lines[i] = annotation
+			}
+		}
+		doc["documentComment"] = strings.Join(lines, "\n")
+	}
 }
 
 // FormatSBOM converts SBOM model to specified format.

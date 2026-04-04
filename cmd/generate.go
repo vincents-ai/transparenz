@@ -12,6 +12,7 @@ import (
 	"github.com/shift/transparenz/internal/repository"
 	"github.com/shift/transparenz/pkg/bsi"
 	"github.com/shift/transparenz/pkg/database"
+	"github.com/shift/transparenz/pkg/depfetch"
 	"github.com/shift/transparenz/pkg/sbom"
 )
 
@@ -23,6 +24,10 @@ var (
 	generateManufacturer    string
 	generateManufacturerURL string
 	generateBinary          string
+	generateScope           string
+
+	// dep-fetch flags
+	generateNoFetch bool
 
 	// submit shortcut flags
 	generateSubmit    bool
@@ -71,10 +76,29 @@ Example usage:
 			return fmt.Errorf("unsupported format: %s (use 'spdx' or 'cyclonedx')", generateFormat)
 		}
 
+		// Validate --scope
+		scope := generateScope
+		if scope == "" {
+			scope = "source"
+		}
+		if !sbom.IsValidScope(scope) {
+			return fmt.Errorf("invalid --scope %q: must be one of: source, binary", scope)
+		}
+		if verbose {
+			fmt.Fprintf(os.Stderr, "Scope: %s\n", scope)
+		}
+
+		// Pre-fetch dependencies so the license classifier can find license files
+		// in the local module/package cache.  Only runs for source-scope scans and
+		// when --no-fetch has not been requested.
+		ctx := context.Background()
+		if scope == "source" && !generateNoFetch {
+			depfetch.Fetch(ctx, sourcePath, verbose)
+		}
+
 		// Create SBOM generator with native Syft library
 		generator := sbom.NewGenerator(verbose)
 
-		ctx := context.Background()
 		var output string
 
 		// Warn if --binary is set without --bsi-compliant (flag would be silently ignored)
@@ -90,7 +114,7 @@ Example usage:
 
 			// Generate SBOM using standard path
 			var err error
-			output, err = generator.Generate(ctx, sourcePath, format)
+			output, err = generator.GenerateWithScope(ctx, sourcePath, format, scope)
 			if err != nil {
 				return fmt.Errorf("failed to generate SBOM: %w", err)
 			}
@@ -150,7 +174,7 @@ Example usage:
 			// require full BSI TR-03183-2 compliance mode; it significantly
 			// improves SBOM quality for all users by default.
 			var err error
-			output, err = generator.Generate(ctx, sourcePath, format)
+			output, err = generator.GenerateWithScope(ctx, sourcePath, format, scope)
 			if err != nil {
 				return fmt.Errorf("failed to generate SBOM: %w", err)
 			}
@@ -271,6 +295,8 @@ func init() {
 	generateCmd.Flags().StringVar(&generateManufacturer, "manufacturer", "", "SBOM producer organisation name (BSI TR-03183-2, also env: TRANSPARENZ_MANUFACTURER)")
 	generateCmd.Flags().StringVar(&generateManufacturerURL, "manufacturer-url", "", "SBOM producer organisation URL (also env: TRANSPARENZ_MANUFACTURER_URL)")
 	generateCmd.Flags().StringVar(&generateBinary, "binary", "", "Path to compiled binary for SHA-512 hash injection (BSI TR-03183-2 §4.3, requires --bsi-compliant)")
+	generateCmd.Flags().StringVar(&generateScope, "scope", "source", "SBOM scope: source (scan dependency manifests: go.mod, package.json, etc) or binary (scan a compiled binary or container image)")
+	generateCmd.Flags().BoolVar(&generateNoFetch, "no-fetch", false, "Skip pre-scan dependency fetching (disables go mod download, npm ci, etc. before SBOM generation)")
 	generateCmd.Flags().BoolVar(&generateSubmit, "submit", false, "Submit generated SBOM to a remote server after generation")
 	generateCmd.Flags().StringVar(&generateServerURL, "server-url", "", "Remote server endpoint for SBOM submission (also env: TRANSPARENZ_SERVER_URL)")
 	generateCmd.Flags().StringVar(&generateToken, "token", "", "Bearer token for SBOM submission (also env: TRANSPARENZ_TOKEN)")

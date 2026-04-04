@@ -82,6 +82,7 @@ class SBOM:
     spec_version: str
     components: list[Component] = field(default_factory=list)
     tool: str = ""
+    scope: str = ""      # value of transparenz:scope property, if present
 
     @property
     def component_count(self) -> int:
@@ -121,6 +122,13 @@ def parse_cyclonedx(path: str) -> SBOM:
             tool_name = t.get("name", "")
             break
 
+    # Extract transparenz:scope from metadata.properties
+    scope = ""
+    for prop in meta.get("properties", []):
+        if isinstance(prop, dict) and prop.get("name") == "transparenz:scope":
+            scope = prop.get("value", "")
+            break
+
     components = []
     for raw in data.get("components", []):
         hashes = {}
@@ -157,6 +165,7 @@ def parse_cyclonedx(path: str) -> SBOM:
         spec_version=spec,
         components=components,
         tool=tool_name,
+        scope=scope,
     )
 
 
@@ -169,6 +178,14 @@ def parse_spdx_json(path: str) -> SBOM:
     for ci in data.get("creationInfo", {}).get("creators", []):
         if ci.startswith("Tool:"):
             tool_name = ci[5:].strip()
+            break
+
+    # Extract transparenz:scope from documentComment
+    scope = ""
+    doc_comment = data.get("documentComment", "")
+    for line in doc_comment.split("\n"):
+        if line.startswith("transparenz:scope="):
+            scope = line.split("=", 1)[1].strip()
             break
 
     components = []
@@ -213,6 +230,7 @@ def parse_spdx_json(path: str) -> SBOM:
         spec_version=spec,
         components=components,
         tool=tool_name,
+        scope=scope,
     )
 
 
@@ -337,6 +355,34 @@ def load_sbom(path: str) -> SBOM:
 
 # ── Comparison ────────────────────────────────────────────────────────────────
 
+# Package types that indicate a binary/OS/container SBOM rather than a source SBOM.
+_BINARY_PURL_TYPES = frozenset({"rpm", "deb", "apk", "oci", "docker", "container"})
+_BINARY_NAME_SUFFIXES = (".tar", ".tar.gz", ".tar.xz", ".tar.bz2", ".img", ".iso",
+                         ".exe", ".dll", ".so")
+
+
+def is_binary_sbom(s: SBOM) -> bool:
+    """Heuristic: return True if the SBOM looks like a binary/container SBOM.
+
+    Criteria (any one is sufficient):
+    - ≥10% of components have PURLs with OS/container ecosystem types
+    - ≥10% of component names end with binary artifact suffixes (.tar, .img, …)
+    """
+    if not s.components:
+        return False
+    total = len(s.components)
+
+    purl_hits = sum(
+        1 for c in s.components
+        if c.purl and any(f"pkg:{t}/" in c.purl for t in _BINARY_PURL_TYPES)
+    )
+    name_hits = sum(
+        1 for c in s.components
+        if any(c.name.lower().endswith(suf) for suf in _BINARY_NAME_SUFFIXES)
+    )
+
+    return (purl_hits / total >= 0.10) or (name_hits / total >= 0.10)
+
 @dataclass
 class ComparisonResult:
     project: str
@@ -346,6 +392,11 @@ class ComparisonResult:
     official_spec: str
     generated_format: str
     generated_spec: str
+
+    # Scope metadata
+    generated_scope: str = ""    # value of transparenz:scope in generated SBOM
+    official_looks_binary: bool = False   # heuristic result for official SBOM
+    scope_mismatch: bool = False  # True when generated=source but official=binary
 
     # Counts
     generated_count: int = 0
@@ -383,7 +434,16 @@ def compare(project: str, generated: SBOM, official: SBOM) -> ComparisonResult:
     only_off = sorted(off_names - gen_names)
     only_gen = sorted(gen_names - off_names)
 
-    recall = len(overlap) / len(off_names) if off_names else 0.0
+    # Scope-mismatch detection: generated is source SBOM but official looks binary.
+    gen_scope = generated.scope if generated.scope else "source"
+    off_looks_binary = is_binary_sbom(official)
+    scope_mismatch = (gen_scope == "source") and off_looks_binary
+
+    # When there is a scope mismatch recall is not meaningful; set to 0.
+    if scope_mismatch:
+        recall = 0.0
+    else:
+        recall = len(overlap) / len(off_names) if off_names else 0.0
 
     # Components in official that are missing PURLs in generated
     gen_by_name = {c.name.lower(): c for c in generated.components}
@@ -400,6 +460,9 @@ def compare(project: str, generated: SBOM, official: SBOM) -> ComparisonResult:
         official_spec=official.spec_version,
         generated_format=generated.format,
         generated_spec=generated.spec_version,
+        generated_scope=gen_scope,
+        official_looks_binary=off_looks_binary,
+        scope_mismatch=scope_mismatch,
         generated_count=generated.component_count,
         official_count=official.component_count,
         count_delta=generated.component_count - official.component_count,
@@ -453,17 +516,29 @@ def render_text(results: list[ComparisonResult]) -> str:
         lines.append(f"┌─ {r.project.upper()} {'─' * max(0, 60 - len(r.project))}")
         lines.append(f"│  Generated : {r.generated_file}  ({r.generated_format} {r.generated_spec})")
         lines.append(f"│  Official  : {r.official_file}  ({r.official_format} {r.official_spec})")
+        scope_note = f"scope={r.generated_scope}" if r.generated_scope else "scope=source (default)"
+        lines.append(f"│  Scope     : {scope_note}"
+                     + ("  [official appears binary — SCOPE MISMATCH]" if r.scope_mismatch else ""))
         lines.append("│")
-        lines.append(f"│  Components")
-        lines.append(f"│    Generated : {r.generated_count:>5}")
-        lines.append(f"│    Official  : {r.official_count:>5}")
-        lines.append(f"│    Delta     : {delta_str(r.count_delta):>5}  "
-                     f"({'over' if r.count_delta > 0 else 'under'}-counts official)")
-        lines.append("│")
-        lines.append(f"│  Name overlap (recall — official packages found in generated)")
-        lines.append(f"│    {bar(r.name_overlap_pct)} {pct(r.name_overlap_pct)}"
-                     f"  ({r.overlap_by_name}/{r.official_count} official packages)")
-        lines.append("│")
+
+        if r.scope_mismatch:
+            lines.append("│  ⚠  SCOPE MISMATCH: generated SBOM is a SOURCE SBOM (dependency manifests)")
+            lines.append("│     but the official SBOM appears to be a BINARY/CONTAINER SBOM.")
+            lines.append("│     Recall and overlap metrics are not meaningful for this comparison.")
+            lines.append("│     This is a category mismatch, not a bug in transparenz.")
+            lines.append("│")
+        else:
+            lines.append(f"│  Components")
+            lines.append(f"│    Generated : {r.generated_count:>5}")
+            lines.append(f"│    Official  : {r.official_count:>5}")
+            lines.append(f"│    Delta     : {delta_str(r.count_delta):>5}  "
+                         f"({'over' if r.count_delta > 0 else 'under'}-counts official)")
+            lines.append("│")
+            lines.append(f"│  Name overlap (recall — official packages found in generated)")
+            lines.append(f"│    {bar(r.name_overlap_pct)} {pct(r.name_overlap_pct)}"
+                         f"  ({r.overlap_by_name}/{r.official_count} official packages)")
+            lines.append("│")
+
         lines.append(f"│  Coverage comparison        Generated          Official")
         lines.append(f"│  {'─'*56}")
 
@@ -483,31 +558,32 @@ def render_text(results: list[ComparisonResult]) -> str:
             )
 
         lines.append("│")
-        if r.only_in_official:
-            lines.append(f"│  Packages in official NOT in generated ({len(r.only_in_official)} shown, "
-                         f"{len(r.only_in_official)} total):")
-            for name in r.only_in_official[:15]:
-                lines.append(f"│    - {name}")
-            if len(r.only_in_official) > 15:
-                lines.append(f"│    … and {len(r.only_in_official) - 15} more")
-        else:
-            lines.append("│  Packages in official NOT in generated: none ✓")
+        if not r.scope_mismatch:
+            if r.only_in_official:
+                lines.append(f"│  Packages in official NOT in generated ({len(r.only_in_official)} shown, "
+                             f"{len(r.only_in_official)} total):")
+                for name in r.only_in_official[:15]:
+                    lines.append(f"│    - {name}")
+                if len(r.only_in_official) > 15:
+                    lines.append(f"│    … and {len(r.only_in_official) - 15} more")
+            else:
+                lines.append("│  Packages in official NOT in generated: none ✓")
 
-        lines.append("│")
-        if r.only_in_generated:
-            lines.append(f"│  Packages in generated NOT in official ({len(r.only_in_generated)} shown):")
-            for name in r.only_in_generated[:10]:
-                lines.append(f"│    + {name}")
-            if len(r.only_in_generated) > 10:
-                lines.append(f"│    … and {len(r.only_in_generated) - 10} more")
-        else:
-            lines.append("│  Packages in generated NOT in official: none")
-
-        if r.missing_purls_sample:
             lines.append("│")
-            lines.append(f"│  Matched packages missing PURLs in generated ({len(r.missing_purls_sample)}):")
-            for name in r.missing_purls_sample[:10]:
-                lines.append(f"│    ✗ {name}")
+            if r.only_in_generated:
+                lines.append(f"│  Packages in generated NOT in official ({len(r.only_in_generated)} shown):")
+                for name in r.only_in_generated[:10]:
+                    lines.append(f"│    + {name}")
+                if len(r.only_in_generated) > 10:
+                    lines.append(f"│    … and {len(r.only_in_generated) - 10} more")
+            else:
+                lines.append("│  Packages in generated NOT in official: none")
+
+            if r.missing_purls_sample:
+                lines.append("│")
+                lines.append(f"│  Matched packages missing PURLs in generated ({len(r.missing_purls_sample)}):")
+                for name in r.missing_purls_sample[:10]:
+                    lines.append(f"│    ✗ {name}")
 
         lines.append("└" + "─" * 78)
         lines.append("")
@@ -518,25 +594,43 @@ def render_text(results: list[ComparisonResult]) -> str:
     lines.append("=" * 80)
     hdr = (
         f"{'Project':<20} {'Gen':>5} {'Off':>5} {'Δ':>5}  "
-        f"{'Recall':>7}  {'PURL%':>6}  {'Lic%':>6}  {'SHA512%':>8}  {'Suppl%':>7}"
+        f"{'Recall':>7}  {'PURL%':>6}  {'Lic%':>6}  {'SHA512%':>8}  {'Suppl%':>7}  {'Scope'}"
     )
     lines.append(hdr)
-    lines.append("─" * 80)
+    lines.append("─" * 90)
     for r in results:
+        scope_col = "SCOPE_MISMATCH" if r.scope_mismatch else (r.generated_scope or "source")
+        recall_col = "   n/a " if r.scope_mismatch else pct(r.name_overlap_pct)
         lines.append(
             f"{r.project:<20} {r.generated_count:>5} {r.official_count:>5} "
             f"{delta_str(r.count_delta):>5}  "
-            f"{pct(r.name_overlap_pct):>7}  "
+            f"{recall_col:>7}  "
             f"{pct(r.generated_purl_cov):>6}  "
             f"{pct(r.generated_license_cov):>6}  "
             f"{pct(r.generated_sha512_cov):>8}  "
-            f"{pct(r.generated_supplier_cov):>7}"
+            f"{pct(r.generated_supplier_cov):>7}  "
+            f"{scope_col}"
         )
     lines.append("")
     lines.append("Legend: Gen=generated components, Off=official components, Δ=Gen-Off,")
     lines.append("        Recall=% of official packages found in generated SBOM,")
-    lines.append("        PURL%/Lic%/SHA512%/Suppl% = coverage in generated SBOM")
+    lines.append("        PURL%/Lic%/SHA512%/Suppl% = coverage in generated SBOM,")
+    lines.append("        Scope: SCOPE_MISMATCH = generated is source SBOM but official is binary/container")
     lines.append("")
+
+    # ── Scope mismatch summary ─────────────────────────────────────────────
+    mismatches = [r for r in results if r.scope_mismatch]
+    if mismatches:
+        lines.append("=" * 80)
+        lines.append("  SCOPE MISMATCH NOTES")
+        lines.append("=" * 80)
+        for r in mismatches:
+            lines.append(f"  {r.project}: generated SBOM is source-scoped (lists Go/npm/etc deps)")
+            lines.append(f"    but official SBOM is binary/container-scoped (lists OS packages/.tar artifacts).")
+            lines.append(f"    0% recall is expected and is NOT a bug — this is a category mismatch.")
+            lines.append(f"    To compare properly, either obtain the official source SBOM or generate")
+            lines.append(f"    a binary SBOM with: transparenz generate --scope binary <image>")
+        lines.append("")
 
     return "\n".join(lines)
 
@@ -651,12 +745,17 @@ def main():
         json.dump([asdict(r) for r in results], f, indent=2)
     print(f"Full JSON report: {report_path}", file=sys.stderr)
 
-    # Exit 1 if recall < 50% on any project
-    low_recall = [r for r in results if r.name_overlap_pct < 0.5]
+    # Exit 1 if recall < 50% on any project (excluding scope-mismatch comparisons)
+    low_recall = [r for r in results if r.name_overlap_pct < 0.5 and not r.scope_mismatch]
     if low_recall:
         print(f"WARNING: {len(low_recall)} project(s) have recall < 50%: "
               f"{[r.project for r in low_recall]}", file=sys.stderr)
         sys.exit(1)
+
+    scope_mismatches = [r for r in results if r.scope_mismatch]
+    if scope_mismatches:
+        print(f"NOTE: {len(scope_mismatches)} project(s) had scope-mismatch (source vs binary): "
+              f"{[r.project for r in scope_mismatches]} — recall not computed", file=sys.stderr)
 
 
 if __name__ == "__main__":
