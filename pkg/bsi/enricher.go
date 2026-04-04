@@ -82,6 +82,65 @@ func (e *Enricher) EnrichSBOM(sbomJSON string) (string, error) {
 	return string(enriched), nil
 }
 
+// InjectSuppliers adds supplier information to SBOM components/packages where
+// it is absent. This is a lightweight enrichment suitable for the standard
+// generate path (without full BSI TR-03183-2 compliance mode). It uses the
+// same detectSupplier heuristics as full BSI enrichment but does not add BSI
+// annotations, completeness assertions, or specVersion overrides.
+//
+// For CycloneDX: sets component.supplier = {"name": "<supplier>"}.
+// For SPDX: sets package.supplier = "Organization: <supplier>".
+func (e *Enricher) InjectSuppliers(sbomJSON string) (string, error) {
+	var sbomData map[string]interface{}
+	if err := json.Unmarshal([]byte(sbomJSON), &sbomData); err != nil {
+		return "", fmt.Errorf("InjectSuppliers: failed to parse SBOM: %w", err)
+	}
+
+	if bomFormat, ok := sbomData["bomFormat"].(string); ok && bomFormat == "CycloneDX" {
+		components, ok := sbomData["components"].([]interface{})
+		if !ok {
+			return sbomJSON, nil
+		}
+		for i, compData := range components {
+			comp, ok := compData.(map[string]interface{})
+			if !ok {
+				continue
+			}
+			if getString(comp, "supplier") == "" {
+				if sup := e.detectSupplier(getString(comp, "name")); sup != "" {
+					comp["supplier"] = map[string]interface{}{"name": sup}
+				}
+			}
+			components[i] = comp
+		}
+		sbomData["components"] = components
+	} else {
+		packages, ok := sbomData["packages"].([]interface{})
+		if !ok {
+			return sbomJSON, nil
+		}
+		for i, pkgData := range packages {
+			pkg, ok := pkgData.(map[string]interface{})
+			if !ok {
+				continue
+			}
+			if sup := getString(pkg, "supplier"); sup == "" || sup == "NOASSERTION" {
+				if detected := e.detectSupplier(getString(pkg, "name")); detected != "" {
+					pkg["supplier"] = fmt.Sprintf("Organization: %s", detected)
+				}
+			}
+			packages[i] = pkg
+		}
+		sbomData["packages"] = packages
+	}
+
+	enriched, err := json.MarshalIndent(sbomData, "", "  ")
+	if err != nil {
+		return "", fmt.Errorf("InjectSuppliers: failed to marshal SBOM: %w", err)
+	}
+	return string(enriched), nil
+}
+
 // EnrichSBOMModel enriches an SBOM model with licenses, hashes, and suppliers.
 // This method works directly with Syft's native SBOM structures for better performance.
 //

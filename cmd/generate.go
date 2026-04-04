@@ -145,11 +145,23 @@ Example usage:
 				fmt.Fprintf(os.Stderr, "Binary SHA-512 hash injected: %s\n", absBinary)
 			}
 		} else {
-			// Standard generation without enrichment
+			// Standard generation: generate SBOM then inject supplier metadata.
+			// Supplier injection is a lightweight post-process that does not
+			// require full BSI TR-03183-2 compliance mode; it significantly
+			// improves SBOM quality for all users by default.
 			var err error
 			output, err = generator.Generate(ctx, sourcePath, format)
 			if err != nil {
 				return fmt.Errorf("failed to generate SBOM: %w", err)
+			}
+
+			enricher := bsi.NewEnricher(sourcePath)
+			output, err = enricher.InjectSuppliers(output)
+			if err != nil {
+				// Non-fatal: supplier injection failure should not abort generation
+				if verbose {
+					fmt.Fprintf(os.Stderr, "warning: supplier injection failed: %v\n", err)
+				}
 			}
 		}
 

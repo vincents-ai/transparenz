@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/anchore/syft/syft"
@@ -81,9 +82,13 @@ func (g *Generator) Generate(ctx context.Context, sourcePath string, format stri
 
 	result := string(output)
 
-	// Strip absolute source path from component names to keep SBOMs reproducible
-	if strings.HasPrefix(sourcePath, "/") {
-		result = strings.ReplaceAll(result, sourcePath, ".")
+	// Strip absolute source path from output to keep SBOMs reproducible.
+	// Always resolve to absolute first: Syft internally resolves "." and
+	// relative paths, embedding the absolute path in the SBOM name/namespace.
+	// Without this, relative inputs like "." leak the machine's working
+	// directory into the generated SBOM.
+	if absSource, err := filepath.Abs(sourcePath); err == nil && absSource != "." {
+		result = strings.ReplaceAll(result, absSource, ".")
 	}
 
 	return result, nil
