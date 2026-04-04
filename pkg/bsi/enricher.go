@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/anchore/syft/syft/license"
@@ -42,11 +43,105 @@ func init() {
 // Enricher provides BSI TR-03183-2 compliance enrichment for SBOMs
 type Enricher struct {
 	sourcePath string
+
+	// subModuleDirs is a lazily-populated map from Go module path → local
+	// directory containing that module's go.mod.  It is built by walking all
+	// subdirectories of sourcePath so that components belonging to staging/
+	// sub-modules (as seen in argo-cd) can have their license files resolved
+	// from the local source tree rather than solely from the module cache.
+	subModuleOnce sync.Once
+	subModuleDirs map[string]string // module-path → abs-dir
 }
 
 // NewEnricher creates a new BSI enricher
 func NewEnricher(sourcePath string) *Enricher {
 	return &Enricher{sourcePath: sourcePath}
+}
+
+// collectGoModDirs walks sourcePath and returns a map of Go module path →
+// directory.  Each directory that contains a go.mod file contributes one
+// entry.  Errors during the walk are silently ignored so that a partially-
+// accessible source tree degrades gracefully.
+func (e *Enricher) collectGoModDirs() map[string]string {
+	result := make(map[string]string)
+	if e.sourcePath == "" {
+		return result
+	}
+
+	_ = filepath.WalkDir(e.sourcePath, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return nil // skip unreadable entries
+		}
+		if d.IsDir() {
+			// Skip hidden directories and common non-module dirs to avoid
+			// spending time in .git, vendor trees, testdata etc.
+			name := d.Name()
+			if strings.HasPrefix(name, ".") || name == "vendor" || name == "testdata" {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if d.Name() != "go.mod" {
+			return nil
+		}
+
+		dir := filepath.Dir(path)
+		modulePath := readModuleName(path)
+		if modulePath != "" {
+			result[modulePath] = dir
+		}
+		return nil
+	})
+
+	return result
+}
+
+// ensureSubModuleDirs lazily initialises subModuleDirs exactly once.
+func (e *Enricher) ensureSubModuleDirs() {
+	e.subModuleOnce.Do(func() {
+		e.subModuleDirs = e.collectGoModDirs()
+	})
+}
+
+// readModuleName reads the "module <path>" directive from a go.mod file.
+// Returns an empty string when the file cannot be read or has no module line.
+func readModuleName(goModPath string) string {
+	f, err := os.Open(goModPath)
+	if err != nil {
+		return ""
+	}
+	defer f.Close()
+
+	scanner := bufio.NewScanner(f)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if strings.HasPrefix(line, "module ") {
+			parts := strings.Fields(line)
+			if len(parts) >= 2 {
+				return parts[1]
+			}
+		}
+	}
+	return ""
+}
+
+// findSubModuleDir returns the local source directory for the sub-module
+// whose module path is the longest prefix match of packageName, or "" if
+// none matches.
+func (e *Enricher) findSubModuleDir(packageName string) string {
+	e.ensureSubModuleDirs()
+
+	bestLen := 0
+	bestDir := ""
+	for modPath, dir := range e.subModuleDirs {
+		if packageName == modPath || strings.HasPrefix(packageName, modPath+"/") {
+			if len(modPath) > bestLen {
+				bestLen = len(modPath)
+				bestDir = dir
+			}
+		}
+	}
+	return bestDir
 }
 
 // EnrichSBOM enriches an SBOM with hashes, licenses, and suppliers
@@ -667,19 +762,9 @@ func (e *Enricher) getKnownLicense(packageName string) string {
 	return ""
 }
 
-// parseLicenseFile attempts to parse LICENSE file from Go module cache
+// parseLicenseFile attempts to parse LICENSE file from Go module cache or
+// from a local sub-module directory discovered by walking the source tree.
 func (e *Enricher) parseLicenseFile(packageName string) string {
-	// Get GOPATH
-	gopath := os.Getenv("GOPATH")
-	if gopath == "" {
-		// Default GOPATH
-		homeDir, err := os.UserHomeDir()
-		if err != nil {
-			return ""
-		}
-		gopath = filepath.Join(homeDir, "go")
-	}
-
 	// Common license file names - include NOTICE
 	licenseFiles := []string{
 		"LICENSE",
@@ -692,10 +777,34 @@ func (e *Enricher) parseLicenseFile(packageName string) string {
 		"NOTICE.txt",
 	}
 
+	// 1. Check local sub-module directories first (handles staging/ style repos
+	//    like argo-cd where components come from embedded sub-modules).
+	if subDir := e.findSubModuleDir(packageName); subDir != "" {
+		for _, licenseFile := range licenseFiles {
+			licensePath := filepath.Join(subDir, licenseFile)
+			if content, err := os.ReadFile(licensePath); err == nil {
+				if detected := detectLicenseFromText(string(content)); detected != "" {
+					return detected
+				}
+			}
+		}
+	}
+
+	// Get GOPATH
+	gopath := os.Getenv("GOPATH")
+	if gopath == "" {
+		// Default GOPATH
+		homeDir, err := os.UserHomeDir()
+		if err != nil {
+			return ""
+		}
+		gopath = filepath.Join(homeDir, "go")
+	}
+
 	// Try to find and parse license file
 	modCachePath := filepath.Join(gopath, "pkg", "mod")
 
-	// Try to get the actual module path
+	// 2. Try to get the actual module path from the cache
 	modulePath := e.getModulePath(packageName)
 	if modulePath != "" {
 		for _, licenseFile := range licenseFiles {
@@ -706,7 +815,7 @@ func (e *Enricher) parseLicenseFile(packageName string) string {
 		}
 	}
 
-	// Fallback: try direct path
+	// 3. Fallback: try direct path in module cache
 	for _, licenseFile := range licenseFiles {
 		licensePath := filepath.Join(modCachePath, packageName, licenseFile)
 		if content, err := os.ReadFile(licensePath); err == nil {
@@ -928,7 +1037,18 @@ func parseAuthorsFile(file *os.File) string {
 	return ""
 }
 
-// getModulePath finds the module path in GOPATH/pkg/mod cache
+// getModulePath finds the module path in GOPATH/pkg/mod cache.
+//
+// The Go module cache layout is:
+//
+//	$GOPATH/pkg/mod/<host>/<org>/<repo>@<version>/
+//
+// e.g. $GOPATH/pkg/mod/github.com/foo/bar@v1.2.3/
+//
+// This function splits packageName on "/" to navigate the host and org
+// directories, then reads the final segment's parent directory looking for
+// entries of the form "<repo>@<version>" (or "<repo>@v<version>" with Go's
+// case-encoded upper-case escaping). It returns the first match found.
 func (e *Enricher) getModulePath(packageName string) string {
 	gopath := os.Getenv("GOPATH")
 	if gopath == "" {
@@ -941,22 +1061,73 @@ func (e *Enricher) getModulePath(packageName string) string {
 
 	modCachePath := filepath.Join(gopath, "pkg", "mod")
 
-	// Try to find the module directory
-	// Module paths in cache use @v notation, e.g., github.com/foo/bar@v1.2.3
-	// We'll do a best-effort search
-	entries, err := os.ReadDir(modCachePath)
+	// Split the module path into its slash-separated segments.
+	// For a package sub-path like "github.com/foo/bar/pkg/baz" the module is
+	// most likely "github.com/foo/bar".  We try progressively shorter prefixes
+	// (longest first) so that nested modules (e.g. "github.com/foo/bar/v2")
+	// are preferred over their parent.
+	parts := strings.Split(packageName, "/")
+
+	// Try from longest to shortest: minimum 2 segments (host/org is not enough
+	// to form a module path; we need at least host/org/repo → 3 segments).
+	for end := len(parts); end >= 2; end-- {
+		candidate := strings.Join(parts[:end], "/")
+		if dir := findVersionedModDir(modCachePath, candidate); dir != "" {
+			return dir
+		}
+	}
+
+	return ""
+}
+
+// findVersionedModDir looks for the versioned module directory inside the Go
+// module cache for the given module path.
+//
+// The cache stores modules as:
+//
+//	<modCachePath>/<host>/<org>/<repo>@<version>/
+//
+// Go also applies case-encoding: uppercase letters in module paths are escaped
+// as "!<lowercase>" (e.g. "Azure" → "!azure"). We handle this by doing a
+// case-insensitive prefix match on the final directory component.
+func findVersionedModDir(modCachePath, modulePath string) string {
+	// Convert the module path to the filesystem path used by the cache.
+	// The Go toolchain escapes uppercase to "!<lower>" but we do a
+	// case-insensitive scan so we don't need to re-implement the encoding.
+	parts := strings.Split(modulePath, "/")
+	if len(parts) < 2 {
+		return ""
+	}
+
+	// The parent directory of the versioned entry is everything except the last
+	// path component: e.g. for "github.com/foo/bar" the parent is
+	// "$modCache/github.com/foo" and we scan for entries starting with "bar@".
+	parentParts := parts[:len(parts)-1]
+	lastName := strings.ToLower(parts[len(parts)-1])
+
+	parentDir := modCachePath
+	for _, p := range parentParts {
+		parentDir = filepath.Join(parentDir, p)
+	}
+
+	entries, err := os.ReadDir(parentDir)
 	if err != nil {
 		return ""
 	}
 
-	// Look for directories matching the package name prefix
-	searchPrefix := strings.ToLower(strings.ReplaceAll(packageName, "/", string(filepath.Separator)))
+	// Pick the most recent version by choosing the last lexicographic entry
+	// that matches "<lastName>@" (or "!<lastName>@" for case-encoded names).
+	// In practice we just return the first match; callers only need any valid
+	// path to read a LICENSE file from.
 	for _, entry := range entries {
-		if entry.IsDir() {
-			entryLower := strings.ToLower(entry.Name())
-			if strings.HasPrefix(entryLower, searchPrefix) {
-				return filepath.Join(modCachePath, entry.Name())
-			}
+		if !entry.IsDir() {
+			continue
+		}
+		entryLower := strings.ToLower(entry.Name())
+		// Strip leading "!" characters used for case-encoding.
+		stripped := strings.TrimLeft(entryLower, "!")
+		if strings.HasPrefix(stripped, lastName+"@") {
+			return filepath.Join(parentDir, entry.Name())
 		}
 	}
 

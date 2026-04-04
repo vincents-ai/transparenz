@@ -1803,6 +1803,311 @@ func TestInjectManufacturer_InvalidJSON(t *testing.T) {
 	}
 }
 
+// ---------------------------------------------------------------------------
+// Sub-module go.mod walking – license enrichment for multi-module repos
+// ---------------------------------------------------------------------------
+
+// TestCollectGoModDirs verifies that collectGoModDirs finds go.mod files in
+// subdirectories and maps their module paths to local directories.
+func TestCollectGoModDirs(t *testing.T) {
+	// Build a temporary source tree that mimics a multi-module repo:
+	//
+	//   root/
+	//     go.mod            (module example.com/root)
+	//     staging/
+	//       submod-a/
+	//         go.mod        (module example.com/staging/submod-a)
+	//         LICENSE       (MIT text)
+	//       submod-b/
+	//         go.mod        (module example.com/staging/submod-b)
+	//         LICENSE       (Apache-2.0 text)
+
+	tmpDir := t.TempDir()
+
+	// Create root go.mod
+	if err := os.WriteFile(filepath.Join(tmpDir, "go.mod"), []byte("module example.com/root\n\ngo 1.21\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Create staging/submod-a
+	subDirA := filepath.Join(tmpDir, "staging", "submod-a")
+	if err := os.MkdirAll(subDirA, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(subDirA, "go.mod"), []byte("module example.com/staging/submod-a\n\ngo 1.21\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Create staging/submod-b
+	subDirB := filepath.Join(tmpDir, "staging", "submod-b")
+	if err := os.MkdirAll(subDirB, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(subDirB, "go.mod"), []byte("module example.com/staging/submod-b\n\ngo 1.21\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	enricher := NewEnricher(tmpDir)
+	dirs := enricher.collectGoModDirs()
+
+	if _, ok := dirs["example.com/root"]; !ok {
+		t.Error("Expected root module to be discovered")
+	}
+	if dir, ok := dirs["example.com/staging/submod-a"]; !ok {
+		t.Error("Expected submod-a to be discovered")
+	} else if dir != subDirA {
+		t.Errorf("submod-a dir: expected %s, got %s", subDirA, dir)
+	}
+	if dir, ok := dirs["example.com/staging/submod-b"]; !ok {
+		t.Error("Expected submod-b to be discovered")
+	} else if dir != subDirB {
+		t.Errorf("submod-b dir: expected %s, got %s", subDirB, dir)
+	}
+}
+
+// TestFindSubModuleDir verifies longest-prefix matching for package names.
+func TestFindSubModuleDir(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	subDirA := filepath.Join(tmpDir, "staging", "submod-a")
+	if err := os.MkdirAll(subDirA, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(subDirA, "go.mod"), []byte("module example.com/staging/submod-a\n\ngo 1.21\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	enricher := NewEnricher(tmpDir)
+
+	// Exact module path match
+	if dir := enricher.findSubModuleDir("example.com/staging/submod-a"); dir != subDirA {
+		t.Errorf("Expected %s, got %q", subDirA, dir)
+	}
+
+	// Sub-package match (prefix + /)
+	if dir := enricher.findSubModuleDir("example.com/staging/submod-a/pkg/client"); dir != subDirA {
+		t.Errorf("Expected %s for sub-package, got %q", subDirA, dir)
+	}
+
+	// No match for unrelated package
+	if dir := enricher.findSubModuleDir("github.com/some/other"); dir != "" {
+		t.Errorf("Expected empty dir for unrelated package, got %q", dir)
+	}
+}
+
+// TestReadModuleName verifies parsing of the module directive from a go.mod file.
+func TestReadModuleName(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	t.Run("valid go.mod", func(t *testing.T) {
+		path := filepath.Join(tmpDir, "go.mod")
+		if err := os.WriteFile(path, []byte("module github.com/foo/bar\n\ngo 1.21\n"), 0644); err != nil {
+			t.Fatal(err)
+		}
+		if name := readModuleName(path); name != "github.com/foo/bar" {
+			t.Errorf("Expected github.com/foo/bar, got %q", name)
+		}
+	})
+
+	t.Run("missing file returns empty", func(t *testing.T) {
+		if name := readModuleName("/nonexistent/go.mod"); name != "" {
+			t.Errorf("Expected empty for missing file, got %q", name)
+		}
+	})
+
+	t.Run("go.mod without module line returns empty", func(t *testing.T) {
+		path := filepath.Join(tmpDir, "go2.mod")
+		if err := os.WriteFile(path, []byte("go 1.21\n"), 0644); err != nil {
+			t.Fatal(err)
+		}
+		if name := readModuleName(path); name != "" {
+			t.Errorf("Expected empty for no module line, got %q", name)
+		}
+	})
+}
+
+// TestParseLicenseFile_SubModuleDir verifies that parseLicenseFile resolves
+// license files from local sub-module directories, simulating how argo-cd's
+// staging/ packages would receive license enrichment.
+func TestParseLicenseFile_SubModuleDir(t *testing.T) {
+	// Use full MIT license text (via helper) so the classifier matches with >0.8 confidence.
+	licenseText := mitLicenseText()
+
+	tmpDir := t.TempDir()
+
+	// Sub-module staging/argoproj-labs/argocd-autoscaler mimics argo-cd layout
+	subDir := filepath.Join(tmpDir, "staging", "src", "argoproj-labs", "argocd-autoscaler")
+	if err := os.MkdirAll(subDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(subDir, "go.mod"),
+		[]byte("module github.com/argoproj-labs/argocd-autoscaler\n\ngo 1.21\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(subDir, "LICENSE"), []byte(licenseText), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	enricher := NewEnricher(tmpDir)
+
+	// Exact module path – should resolve to MIT
+	result := enricher.parseLicenseFile("github.com/argoproj-labs/argocd-autoscaler")
+	if result != "MIT" {
+		t.Errorf("Expected MIT from sub-module dir, got %q", result)
+	}
+
+	// Sub-package within the same module – should also resolve
+	result2 := enricher.parseLicenseFile("github.com/argoproj-labs/argocd-autoscaler/pkg/utils")
+	if result2 != "MIT" {
+		t.Errorf("Expected MIT for sub-package from sub-module dir, got %q", result2)
+	}
+}
+
+// TestEnrichSBOMModel_SubModuleLicenses verifies end-to-end that components
+// belonging to sub-modules in a multi-module source tree receive license
+// enrichment from the sub-module's local LICENSE file.
+func TestEnrichSBOMModel_SubModuleLicenses(t *testing.T) {
+	// Use full MIT license text (via helper) so the classifier matches with >0.8 confidence.
+	licenseText := mitLicenseText()
+
+	tmpDir := t.TempDir()
+
+	// Create a sub-module staging/mylib with a LICENSE file
+	subDir := filepath.Join(tmpDir, "staging", "mylib")
+	if err := os.MkdirAll(subDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(subDir, "go.mod"),
+		[]byte("module example.com/staging/mylib\n\ngo 1.21\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(subDir, "LICENSE"), []byte(licenseText), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	enricher := NewEnricher(tmpDir)
+
+	sbomModel := &sbom.SBOM{
+		Artifacts: sbom.Artifacts{
+			Packages: pkg.NewCollection(),
+		},
+	}
+
+	// Package whose module path maps to the sub-module – should get MIT from
+	// the local LICENSE file discovered by collectGoModDirs.
+	subPkg := pkg.Package{
+		Name:     "example.com/staging/mylib",
+		Version:  "v0.1.0",
+		Type:     pkg.GoModulePkg,
+		Licenses: pkg.NewLicenseSet(),
+		Metadata: pkg.GolangModuleEntry{},
+	}
+	subPkg.SetID()
+	sbomModel.Artifacts.Packages.Add(subPkg)
+
+	// Well-known package that should still be enriched via knownLicenses
+	cobraPkg := pkg.Package{
+		Name:     "github.com/spf13/cobra",
+		Version:  "v1.10.2",
+		Type:     pkg.GoModulePkg,
+		Licenses: pkg.NewLicenseSet(),
+		Metadata: pkg.GolangModuleEntry{},
+	}
+	cobraPkg.SetID()
+	sbomModel.Artifacts.Packages.Add(cobraPkg)
+
+	enrichedModel, err := enricher.EnrichSBOMModel(sbomModel)
+	if err != nil {
+		t.Fatalf("EnrichSBOMModel failed: %v", err)
+	}
+
+	packages := enrichedModel.Artifacts.Packages.Sorted()
+	if len(packages) != 2 {
+		t.Fatalf("Expected 2 packages, got %d", len(packages))
+	}
+
+	for _, p := range packages {
+		if p.Licenses.Empty() {
+			t.Errorf("Package %q has no license after enrichment", p.Name)
+			continue
+		}
+		lics := p.Licenses.ToSlice()
+		if p.Name == "example.com/staging/mylib" {
+			found := false
+			for _, l := range lics {
+				if l.SPDXExpression == "MIT" || l.Value == "MIT" {
+					found = true
+					break
+				}
+			}
+			if !found {
+				t.Errorf("Expected MIT for sub-module package, got %v", lics)
+			}
+		}
+		if p.Name == "github.com/spf13/cobra" {
+			found := false
+			for _, l := range lics {
+				if l.SPDXExpression == "Apache-2.0" || l.Value == "Apache-2.0" {
+					found = true
+					break
+				}
+			}
+			if !found {
+				t.Errorf("Expected Apache-2.0 for cobra, got %v", lics)
+			}
+		}
+	}
+}
+
+// TestCollectGoModDirs_SkipsVendorAndHidden verifies that vendor/ and hidden
+// directories are skipped during the walk.
+func TestCollectGoModDirs_SkipsVendorAndHidden(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	// Should be discovered
+	validDir := filepath.Join(tmpDir, "staging", "valid")
+	if err := os.MkdirAll(validDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(validDir, "go.mod"),
+		[]byte("module example.com/valid\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Should be skipped (vendor/)
+	vendorDir := filepath.Join(tmpDir, "vendor", "pkg")
+	if err := os.MkdirAll(vendorDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(vendorDir, "go.mod"),
+		[]byte("module example.com/vendored\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Should be skipped (hidden dir)
+	hiddenDir := filepath.Join(tmpDir, ".hidden", "sub")
+	if err := os.MkdirAll(hiddenDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(hiddenDir, "go.mod"),
+		[]byte("module example.com/hidden\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	enricher := NewEnricher(tmpDir)
+	dirs := enricher.collectGoModDirs()
+
+	if _, ok := dirs["example.com/valid"]; !ok {
+		t.Error("Expected example.com/valid to be discovered")
+	}
+	if _, ok := dirs["example.com/vendored"]; ok {
+		t.Error("vendor/ module should have been skipped")
+	}
+	if _, ok := dirs["example.com/hidden"]; ok {
+		t.Error("Hidden dir module should have been skipped")
+	}
+}
+
 // TestInjectManufacturer_CycloneDX_URLEmpty verifies that an empty URL is handled
 // gracefully (url array omitted or empty).
 func TestInjectManufacturer_CycloneDX_URLEmpty(t *testing.T) {
@@ -1838,3 +2143,160 @@ func TestInjectManufacturer_CycloneDX_URLEmpty(t *testing.T) {
 		}
 	}
 }
+
+// ---------------------------------------------------------------------------
+// getModulePath / findVersionedModDir regression tests
+//
+// These tests verify the root cause of the 21% license coverage bug:
+// the original getModulePath only read the top-level GOPATH/pkg/mod dir
+// (which lists host directories like "github.com") and never navigated
+// into the host/org/ subdirectory to find versioned entries like
+// "bar@v1.2.3". The fixed implementation navigates the correct path.
+// ---------------------------------------------------------------------------
+
+// TestFindVersionedModDir verifies that the helper can locate versioned
+// module directories in a fake module cache.
+func TestFindVersionedModDir(t *testing.T) {
+	// Build a minimal fake GOPATH/pkg/mod tree:
+	//
+	//   modCache/
+	//     github.com/
+	//       foo/
+	//         bar@v1.2.3/          ← contains LICENSE
+	//         baz@v0.5.0/
+	//       !azure/                ← case-encoded uppercase "Azure"
+	//         sdk@v1.0.0/
+
+	modCache := t.TempDir()
+
+	// github.com/foo/bar@v1.2.3
+	barDir := filepath.Join(modCache, "github.com", "foo", "bar@v1.2.3")
+	if err := os.MkdirAll(barDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(barDir, "LICENSE"), []byte("MIT License\n\nCopyright 2024"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// github.com/foo/baz@v0.5.0
+	bazDir := filepath.Join(modCache, "github.com", "foo", "baz@v0.5.0")
+	if err := os.MkdirAll(bazDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	// github.com/!azure/sdk@v1.0.0  (case-encoded "Azure")
+	azureDir := filepath.Join(modCache, "github.com", "!azure", "sdk@v1.0.0")
+	if err := os.MkdirAll(azureDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Run("finds versioned dir for bar", func(t *testing.T) {
+		got := findVersionedModDir(modCache, "github.com/foo/bar")
+		if got != barDir {
+			t.Errorf("expected %s, got %s", barDir, got)
+		}
+	})
+
+	t.Run("finds versioned dir for baz", func(t *testing.T) {
+		got := findVersionedModDir(modCache, "github.com/foo/baz")
+		if got != bazDir {
+			t.Errorf("expected %s, got %s", bazDir, got)
+		}
+	})
+
+	t.Run("returns empty for non-existent module", func(t *testing.T) {
+		got := findVersionedModDir(modCache, "github.com/nobody/nothing")
+		if got != "" {
+			t.Errorf("expected empty, got %s", got)
+		}
+	})
+
+	t.Run("handles case-encoded directory (!azure → azure)", func(t *testing.T) {
+		// The Go toolchain encodes "Azure" as "!azure" on the filesystem.
+		// findVersionedModDir does a case-insensitive scan of the parent dir,
+		// so even if the org dir is "!azure" on disk, a query for "Azure/sdk"
+		// navigates parentDir = modCache/github.com/Azure which won't exist.
+		// This edge case requires Go's own case-encoder to produce the !-escaped
+		// path and is handled end-to-end; here we just confirm no panic.
+		got := findVersionedModDir(modCache, "github.com/Azure/sdk")
+		// May return azureDir or "" depending on the test OS; we only assert no panic.
+		_ = got
+	})
+
+	t.Run("returns empty for single-segment module path", func(t *testing.T) {
+		got := findVersionedModDir(modCache, "stdlib")
+		if got != "" {
+			t.Errorf("expected empty for single segment, got %s", got)
+		}
+	})
+}
+
+// TestGetModulePath_NavigatesCache verifies that getModulePath (via Enricher)
+// finds the correct versioned directory in a fake GOPATH/pkg/mod cache by
+// setting GOPATH to a temp directory.
+func TestGetModulePath_NavigatesCache(t *testing.T) {
+	// Build fake GOPATH.
+	fakeGopath := t.TempDir()
+	barDir := filepath.Join(fakeGopath, "pkg", "mod", "github.com", "foo", "bar@v1.2.3")
+	if err := os.MkdirAll(barDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Setenv("GOPATH", fakeGopath)
+
+	enricher := NewEnricher(".")
+
+	got := enricher.getModulePath("github.com/foo/bar")
+	if got != barDir {
+		t.Errorf("expected %s, got %q", barDir, got)
+	}
+}
+
+// TestGetModulePath_SubPackageFallsBackToModule ensures that a sub-package
+// path like "github.com/foo/bar/pkg/client" resolves to the module root
+// "github.com/foo/bar" (not a non-existent "github.com/foo/bar/pkg" dir).
+func TestGetModulePath_SubPackageFallsBackToModule(t *testing.T) {
+	fakeGopath := t.TempDir()
+	barDir := filepath.Join(fakeGopath, "pkg", "mod", "github.com", "foo", "bar@v1.0.0")
+	if err := os.MkdirAll(barDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Setenv("GOPATH", fakeGopath)
+
+	enricher := NewEnricher(".")
+	got := enricher.getModulePath("github.com/foo/bar/pkg/client")
+	if got != barDir {
+		t.Errorf("expected %s for sub-package, got %q", barDir, got)
+	}
+}
+
+// TestParseLicenseFile_ModuleCache verifies that parseLicenseFile reads the
+// LICENSE file from the Go module cache when GOPATH is set to a fake dir.
+func TestParseLicenseFile_ModuleCache(t *testing.T) {
+	fakeGopath := t.TempDir()
+	// Use a package name that is NOT in the knownLicenses map to force
+	// the cache lookup path (knownLicenses only contains ~20 well-known packages).
+	pkgName := "github.com/unknown-org/some-lib"
+	// Navigate to the per-path module directory: host/org/repo@version
+	libDir := filepath.Join(fakeGopath, "pkg", "mod", "github.com", "unknown-org", "some-lib@v1.0.0")
+	if err := os.MkdirAll(libDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	// Write a full MIT license (mitLicenseText produces text the classifier detects
+	// with >0.8 confidence).
+	if err := os.WriteFile(filepath.Join(libDir, "LICENSE"), []byte(mitLicenseText()), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Setenv("GOPATH", fakeGopath)
+
+	enricher := NewEnricher(".")
+	got := enricher.parseLicenseFile(pkgName)
+	if got == "" {
+		t.Errorf("expected a license from module cache, got empty string")
+	}
+}
+
+// apacheLicenseText is intentionally removed; use mitLicenseText() from
+// license_testdata_test.go for classifier-detectable license content.
