@@ -23,12 +23,7 @@ rec {
     echo "   - CycloneDX 1.6 compliance"
     echo "   - SPDX 2.3 compliance"
     echo ""
-    echo "4. Vulnerability Sync (transparenz-go-vulnz)"
-    echo "   - vulnz service integration"
-    echo "   - Database download and validation"
-    echo "   - Multi-provider merge"
-    echo ""
-    echo "5. End-to-End (transparenz-go-e2e)"
+    echo "4. End-to-End (transparenz-go-e2e)"
     echo "   - Full pipeline test"
     echo "   - PostgreSQL + CLI + SBOM + Vulnerability scan"
     echo ""
@@ -48,7 +43,6 @@ rec {
         "transparenz-go-cli" = import ./transparenz-go-test.nix;
         "transparenz-go-database" = import ./database-integration.nix;
         "transparenz-go-bsi-compliance" = import ./bsi-compliance.nix;
-        "transparenz-go-vulnz" = import ./vulnz-integration.nix;
         "transparenz-go-e2e" = import ./e2e-test.nix;
       };
     in

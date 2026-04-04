@@ -82,22 +82,23 @@ func (e *Enricher) EnrichSBOM(sbomJSON string) (string, error) {
 	return string(enriched), nil
 }
 
-// EnrichSBOMModel enriches an SBOM model with licenses and suppliers
-// This method works directly with Syft's native SBOM structures for better performance
+// EnrichSBOMModel enriches an SBOM model with licenses, hashes, and suppliers.
+// This method works directly with Syft's native SBOM structures for better performance.
 //
-// CRITICAL BSI TR-03183-2 COMPLIANCE NOTE:
-// Hash enrichment from go.sum has been REMOVED to prevent false provenance.
-// h1: hashes represent MODULE ZIP ARCHIVES, NOT compiled binary artifacts.
-// Per BSI TR-03183-2 Section 4.3, artifact hashes must represent the actual
-// deliverable binaries. Providing incorrect hash types violates cryptographic integrity.
-// Production systems must implement CI/CD binary artifact hashing for true compliance.
+// Hash enrichment: for Go module packages, the h1: digest from go.sum is attached.
+// h1: is the canonical Go module integrity hash (SHA-256 of the module zip tree hash),
+// appropriate for source SBOMs. It is stored in GolangModuleEntry.H1Digest, which
+// Syft's formatters translate to a SHA-256 checksum in SBOM output.
+//
+// Supplier enrichment: extracted from the Go module path (first two path segments),
+// stored as a PURL qualifier since Syft's pkg.Package has no top-level Supplier field.
 func (e *Enricher) EnrichSBOMModel(sbomModel *sbom.SBOM) (*sbom.SBOM, error) {
 	if sbomModel == nil {
 		return nil, fmt.Errorf("sbomModel cannot be nil")
 	}
 
-	// REMOVED: goSumHashes := e.loadGoSum()
-	// False provenance violation - h1 hashes are module archives, not binaries
+	// Load go.sum hashes for Go module integrity verification
+	goSumHashes := e.loadGoSumWithPrefix()
 
 	// Get all packages as a sorted list to iterate and get their IDs
 	packages := sbomModel.Artifacts.Packages.Sorted()
@@ -109,25 +110,35 @@ func (e *Enricher) EnrichSBOMModel(sbomModel *sbom.SBOM) (*sbom.SBOM, error) {
 		// Make a copy that we'll modify and add back
 		modifiedPkg := p
 
-		// REMOVED: Hash enrichment for Go modules
-		// Reason: h1 hashes from go.sum are module source archives, NOT binary artifacts.
-		// BSI TR-03183-2 requires artifact-level hashes (compiled binaries).
-		// Providing wrong hash type = false provenance = compliance violation.
-		// See loadGoSum() documentation for full explanation.
+		// Hash enrichment for Go modules: attach h1: digest from go.sum
+		if modifiedPkg.Type == pkg.GoModulePkg {
+			if meta, ok := modifiedPkg.Metadata.(pkg.GolangModuleEntry); ok {
+				if meta.H1Digest == "" {
+					key := modifiedPkg.Name + " " + modifiedPkg.Version
+					if h1 := goSumHashes[key]; h1 != "" {
+						meta.H1Digest = h1
+						modifiedPkg.Metadata = meta
+					}
+				}
+			}
+		}
 
 		// License enrichment - add license if not present or empty
 		if modifiedPkg.Licenses.Empty() {
 			if licenseValue := e.detectLicense(modifiedPkg.Name); licenseValue != "" {
-				// Create new license and add to package
 				newLicense := pkg.NewLicenseFromType(licenseValue, license.Declared)
 				modifiedPkg.Licenses.Add(newLicense)
 			}
 		}
 
-		// Supplier enrichment - store in PURL qualifiers or CPE vendor
-		// Note: Syft doesn't have a direct "Supplier" field in Package struct
-		// We'll add it as metadata comment or skip for native model
-		// The supplier info is better suited for format-specific encoding
+		// Supplier enrichment via PURL qualifier (Syft pkg.Package has no Supplier field)
+		if modifiedPkg.Type == pkg.GoModulePkg && modifiedPkg.PURL != "" {
+			if sup := extractSupplierFromModulePath(modifiedPkg.Name); sup != "" {
+				if !strings.Contains(modifiedPkg.PURL, "supplier=") {
+					modifiedPkg.PURL = modifiedPkg.PURL + "?supplier=" + sup
+				}
+			}
+		}
 
 		// Add enriched package to new collection
 		enrichedPackages.Add(modifiedPkg)
@@ -137,6 +148,64 @@ func (e *Enricher) EnrichSBOMModel(sbomModel *sbom.SBOM) (*sbom.SBOM, error) {
 	sbomModel.Artifacts.Packages = enrichedPackages
 
 	return sbomModel, nil
+}
+
+// loadGoSumWithPrefix loads Go module hashes from go.sum, returning a map keyed
+// by "module version" (space-separated, matching Syft's internal format).
+// Values retain the full "h1:BASE64=" prefix so they can be stored directly in
+// GolangModuleEntry.H1Digest without re-encoding.
+func (e *Enricher) loadGoSumWithPrefix() map[string]string {
+	hashes := make(map[string]string)
+
+	goSumPath := filepath.Join(e.sourcePath, "go.sum")
+	file, err := os.Open(goSumPath)
+	if err != nil {
+		return hashes
+	}
+	defer file.Close()
+
+	scanner := bufio.NewScanner(file)
+	for scanner.Scan() {
+		line := scanner.Text()
+		parts := strings.Fields(line)
+		if len(parts) < 3 {
+			continue
+		}
+		module := parts[0]
+		version := parts[1]
+		hash := parts[2]
+
+		// Skip go.mod-only entries; keep module zip entries
+		if strings.HasSuffix(version, "/go.mod") {
+			continue
+		}
+		if !strings.HasPrefix(hash, "h1:") {
+			continue
+		}
+
+		key := module + " " + version
+		hashes[key] = hash
+	}
+
+	return hashes
+}
+
+// extractSupplierFromModulePath derives a supplier identifier from a Go module path.
+// Returns the first two path segments (host + org), which is sufficient to identify
+// the publishing organisation for most modules:
+//
+//	github.com/prometheus/client_golang → github.com/prometheus
+//	golang.org/x/net                   → golang.org/x
+//	k8s.io/api                         → k8s.io/api
+func extractSupplierFromModulePath(modulePath string) string {
+	if modulePath == "" {
+		return ""
+	}
+	parts := strings.SplitN(modulePath, "/", 3)
+	if len(parts) < 2 {
+		return ""
+	}
+	return parts[0] + "/" + parts[1]
 }
 
 // enrichSPDX enriches SPDX format SBOMs

@@ -5,8 +5,11 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/anchore/syft/syft"
+	"github.com/anchore/syft/syft/artifact"
+	"github.com/anchore/syft/syft/cataloging"
 	"github.com/anchore/syft/syft/format/cyclonedxjson"
 	"github.com/anchore/syft/syft/format/spdxjson"
 	"github.com/anchore/syft/syft/sbom"
@@ -25,7 +28,20 @@ func NewGenerator(verbose bool) *Generator {
 	}
 }
 
-// Generate creates an SBOM from a source path using native Syft library
+// buildSBOMConfig returns a Syft CreateSBOMConfig that excludes catalogers which
+// produce non-dependency noise:
+//   - github-actions-usage-cataloger: emits GitHub Action pins from workflow files
+//   - file (tag): file-digest, file-metadata, file-content catalogers
+func buildSBOMConfig() *syft.CreateSBOMConfig {
+	selection := cataloging.NewSelectionRequest().
+		WithRemovals("github-actions-usage-cataloger", "file")
+
+	return syft.DefaultCreateSBOMConfig().
+		WithoutFiles().
+		WithCatalogerSelection(selection)
+}
+
+// Generate creates an SBOM from a source path using native Syft library.
 // sourcePath can be:
 //   - Directory path (e.g., ".")
 //   - File path
@@ -33,7 +49,6 @@ func NewGenerator(verbose bool) *Generator {
 //
 // format can be: "spdx" or "cyclonedx"
 func (g *Generator) Generate(ctx context.Context, sourcePath string, format string) (string, error) {
-	// Determine source detection
 	src, err := syft.GetSource(ctx, sourcePath, nil)
 	if err != nil {
 		return "", fmt.Errorf("failed to detect source: %w", err)
@@ -45,30 +60,37 @@ func (g *Generator) Generate(ctx context.Context, sourcePath string, format stri
 		fmt.Fprintf(os.Stderr, "Source detected: %s (ID: %s)\n", sourcePath, desc.ID)
 	}
 
-	// Create SBOM using native Syft
-	cfg := syft.DefaultCreateSBOMConfig()
-	// Use default catalogers (don't call WithCatalogers to use all defaults)
+	cfg := buildSBOMConfig()
 
 	sbomModel, err := syft.CreateSBOM(ctx, src, cfg)
 	if err != nil {
 		return "", fmt.Errorf("failed to create SBOM: %w", err)
 	}
 
+	// Deduplicate packages by PURL (multiple go.mod files can emit the same module)
+	deduplicateByPURL(sbomModel)
+
 	if g.verbose {
 		fmt.Fprintf(os.Stderr, "Cataloged %d packages\n", sbomModel.Artifacts.Packages.PackageCount())
 	}
 
-	// Convert to requested format
 	output, err := g.formatSBOM(sbomModel, format)
 	if err != nil {
 		return "", fmt.Errorf("failed to format SBOM: %w", err)
 	}
 
-	return string(output), nil
+	result := string(output)
+
+	// Strip absolute source path from component names to keep SBOMs reproducible
+	if strings.HasPrefix(sourcePath, "/") {
+		result = strings.ReplaceAll(result, sourcePath, ".")
+	}
+
+	return result, nil
 }
 
-// FormatSBOM converts SBOM model to specified format
-// This is exported to allow formatting of enriched SBOM models
+// FormatSBOM converts SBOM model to specified format.
+// This is exported to allow formatting of enriched SBOM models.
 func (g *Generator) FormatSBOM(sbomModel *sbom.SBOM, format string) ([]byte, error) {
 	var buf bytes.Buffer
 
@@ -103,8 +125,8 @@ func (g *Generator) formatSBOM(sbomModel *sbom.SBOM, format string) ([]byte, err
 	return g.FormatSBOM(sbomModel, format)
 }
 
-// GetSBOMModel generates the raw SBOM model for further processing
-// This is useful for BSI enrichment that needs access to internal structures
+// GetSBOMModel generates the raw SBOM model for further processing.
+// This is useful for BSI enrichment that needs access to internal structures.
 func (g *Generator) GetSBOMModel(ctx context.Context, sourcePath string) (*sbom.SBOM, *source.Description, error) {
 	src, err := syft.GetSource(ctx, sourcePath, nil)
 	if err != nil {
@@ -114,13 +136,40 @@ func (g *Generator) GetSBOMModel(ctx context.Context, sourcePath string) (*sbom.
 
 	desc := src.Describe()
 
-	cfg := syft.DefaultCreateSBOMConfig()
-	// Use default catalogers (don't call WithCatalogers to use all defaults)
+	cfg := buildSBOMConfig()
 
 	sbomModel, err := syft.CreateSBOM(ctx, src, cfg)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to create SBOM: %w", err)
 	}
 
+	// Deduplicate packages by PURL
+	deduplicateByPURL(sbomModel)
+
 	return sbomModel, &desc, nil
+}
+
+// deduplicateByPURL removes packages with duplicate PURLs from an SBOM model,
+// keeping the first occurrence. Packages with no PURL are left untouched.
+// This prevents inflation when multiple go.mod files in a monorepo reference
+// the same upstream module.
+func deduplicateByPURL(sbomModel *sbom.SBOM) {
+	seen := make(map[string]struct{})
+	var toRemove []artifact.ID
+
+	for p := range sbomModel.Artifacts.Packages.Enumerate() {
+		purl := p.PURL
+		if purl == "" {
+			continue
+		}
+		if _, exists := seen[purl]; exists {
+			toRemove = append(toRemove, p.ID())
+		} else {
+			seen[purl] = struct{}{}
+		}
+	}
+
+	for _, id := range toRemove {
+		sbomModel.Artifacts.Packages.Delete(id)
+	}
 }
