@@ -31,8 +31,18 @@ build-all: ## Build for multiple platforms
 	@echo "Built binaries:"
 	@ls -lh $(BUILD_DIR)/
 
-test: ## Run tests
-	go test -v ./...
+test: ## Run tests with race detector
+	go test -race -v ./...
+
+test-short: ## Run tests without integration tests
+	go test -race -short -v ./...
+
+test-coverage: ## Run tests and report coverage
+	go test -race -coverprofile=coverage.out ./...
+	go tool cover -func=coverage.out
+
+test-coverage-html: test-coverage ## Open coverage report in browser
+	go tool cover -html=coverage.out
 
 fmt: ## Format Go code
 	go fmt ./...
