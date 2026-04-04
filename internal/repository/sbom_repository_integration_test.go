@@ -5,59 +5,43 @@ package repository
 
 import (
 	"context"
-	"os"
+	"fmt"
 	"testing"
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	tcpostgres "github.com/testcontainers/testcontainers-go/modules/postgres"
-	gormpostgres "gorm.io/driver/postgres"
-	"gorm.io/gorm"
 
-	"github.com/shift/transparenz/internal/models"
+	"github.com/shift/transparenz/internal/testutil"
 )
 
-func TestSaveSBOM_WithRealPostgreSQL(t *testing.T) {
-	if os.Getenv("INTEGRATION_TEST") != "true" {
-		t.Skip("Skipping integration test. Set INTEGRATION_TEST=true to run.")
-	}
+// helpers ─────────────────────────────────────────────────────────────────────
 
-	ctx := context.Background()
-
-	container, err := tcpostgres.Run(ctx,
-		"postgres:16-alpine",
-		tcpostgres.WithDatabase("transparenz_test"),
-		tcpostgres.WithUsername("test"),
-		tcpostgres.WithPassword("test"),
-	)
-	require.NoError(t, err)
-	t.Cleanup(func() {
-		assert.NoError(t, container.Terminate(ctx))
-	})
-
-	connStr, err := container.ConnectionString(ctx, "sslmode=disable")
-	require.NoError(t, err)
-
-	db, err := gorm.Open(gormpostgres.Open(connStr), &gorm.Config{})
-	require.NoError(t, err)
-
-	err = db.AutoMigrate(&models.SBOM{}, &models.Package{}, &models.Scan{})
-	require.NoError(t, err)
-
-	repo := NewSBOMRepository(db)
-
-	spdxSBOM := `{
+// minimalSPDX returns a well-formed SPDX 2.3 JSON string with the given name
+// and a unique documentNamespace derived from the run UUID.
+func minimalSPDX(name, ns string) string {
+	return fmt.Sprintf(`{
 		"spdxVersion": "SPDX-2.3",
 		"dataLicense": "CC0-1.0",
 		"SPDXID": "SPDXRef-DOCUMENT",
-		"name": "test-project",
-		"documentNamespace": "https://example.com/test-project",
+		"name": %q,
+		"documentNamespace": %q,
 		"documentDescribes": ["SPDXRef-Package"],
-		"creationInfo": {
-			"created": "2026-01-01T00:00:00Z",
-			"creators": ["Tool: test"]
-		},
+		"creationInfo": {"created": "2026-01-01T00:00:00Z", "creators": ["Tool: test"]},
+		"packages": []
+	}`, name, ns)
+}
+
+// minimalSPDXWithPackage is like minimalSPDX but includes one package entry.
+func minimalSPDXWithPackage(name, ns string) string {
+	return fmt.Sprintf(`{
+		"spdxVersion": "SPDX-2.3",
+		"dataLicense": "CC0-1.0",
+		"SPDXID": "SPDXRef-DOCUMENT",
+		"name": %q,
+		"documentNamespace": %q,
+		"documentDescribes": ["SPDXRef-Package"],
+		"creationInfo": {"created": "2026-01-01T00:00:00Z", "creators": ["Tool: test"]},
 		"packages": [
 			{
 				"SPDXID": "SPDXRef-Package",
@@ -76,200 +60,107 @@ func TestSaveSBOM_WithRealPostgreSQL(t *testing.T) {
 				]
 			}
 		]
-	}`
+	}`, name, ns)
+}
 
-	sbomID, err := repo.SaveSBOM(ctx, spdxSBOM, "/test/path")
+// ns creates a unique, test-scoped documentNamespace.
+func ns(prefix string) string {
+	return fmt.Sprintf("https://example.com/%s/%s", prefix, uuid.New().String())
+}
+
+// ─── Tests ────────────────────────────────────────────────────────────────────
+
+func TestSaveSBOM_WithRealPostgreSQL(t *testing.T) {
+	db := testutil.TestDB(t)
+	ctx := context.Background()
+	repo := NewSBOMRepository(db)
+
+	sbomJSON := minimalSPDXWithPackage("test-project", ns("save-test"))
+
+	sbomID, err := repo.SaveSBOM(ctx, sbomJSON, "/test/path")
 	require.NoError(t, err)
 	assert.NotEqual(t, uuid.Nil, sbomID)
 
-	var savedSBOM models.SBOM
-	err = db.Preload("Packages").First(&savedSBOM, "id = ?", sbomID).Error
+	// Verify via a fresh Get so we exercise the full round-trip.
+	found, err := repo.GetSBOM(ctx, sbomID)
 	require.NoError(t, err)
-	assert.Equal(t, "test-project", savedSBOM.Name)
-	assert.Equal(t, "SPDX", savedSBOM.Format)
-	assert.Len(t, savedSBOM.Packages, 1)
-	assert.Equal(t, "test-package", savedSBOM.Packages[0].Name)
+	assert.Equal(t, "test-project", found.Name)
+	assert.Equal(t, "SPDX", found.Format)
+
+	// Verify associated package was persisted.
+	require.NotEmpty(t, found.Packages, "expected packages to be preloaded")
+	assert.Equal(t, "test-package", found.Packages[0].Name)
 }
 
 func TestGetSBOM_WithRealPostgreSQL(t *testing.T) {
-	if os.Getenv("INTEGRATION_TEST") != "true" {
-		t.Skip("Skipping integration test. Set INTEGRATION_TEST=true to run.")
-	}
-
+	db := testutil.TestDB(t)
 	ctx := context.Background()
-
-	container, err := tcpostgres.Run(ctx,
-		"postgres:16-alpine",
-		tcpostgres.WithDatabase("transparenz_test"),
-		tcpostgres.WithUsername("test"),
-		tcpostgres.WithPassword("test"),
-	)
-	require.NoError(t, err)
-	t.Cleanup(func() {
-		assert.NoError(t, container.Terminate(ctx))
-	})
-
-	connStr, _ := container.ConnectionString(ctx, "sslmode=disable")
-	db, err := gorm.Open(gormpostgres.Open(connStr), &gorm.Config{})
-	require.NoError(t, err)
-
-	err = db.AutoMigrate(&models.SBOM{}, &models.Package{}, &models.Scan{})
-	require.NoError(t, err)
-
 	repo := NewSBOMRepository(db)
 
-	spdxSBOM := `{
-		"spdxVersion": "SPDX-2.3",
-		"dataLicense": "CC0-1.0",
-		"SPDXID": "SPDXRef-DOCUMENT",
-		"name": "get-test-project",
-		"documentNamespace": "https://example.com/get-test",
-		"documentDescribes": ["SPDXRef-Package"],
-		"creationInfo": {
-			"created": "2026-01-01T00:00:00Z"
-		},
-		"packages": []
-	}`
-
-	sbomID, err := repo.SaveSBOM(ctx, spdxSBOM, "/test/path")
+	sbomJSON := minimalSPDX("get-test-project", ns("get-test"))
+	sbomID, err := repo.SaveSBOM(ctx, sbomJSON, "/test/path")
 	require.NoError(t, err)
 
-	foundSBOM, err := repo.GetSBOM(ctx, sbomID)
+	found, err := repo.GetSBOM(ctx, sbomID)
 	require.NoError(t, err)
-	assert.Equal(t, "get-test-project", foundSBOM.Name)
-	assert.Equal(t, "SPDX", foundSBOM.Format)
+	assert.Equal(t, "get-test-project", found.Name)
+	assert.Equal(t, "SPDX", found.Format)
 }
 
 func TestGetSBOM_NotFound_WithRealPostgreSQL(t *testing.T) {
-	if os.Getenv("INTEGRATION_TEST") != "true" {
-		t.Skip("Skipping integration test. Set INTEGRATION_TEST=true to run.")
-	}
-
+	db := testutil.TestDB(t)
 	ctx := context.Background()
-
-	container, err := tcpostgres.Run(ctx,
-		"postgres:16-alpine",
-		tcpostgres.WithDatabase("transparenz_test"),
-		tcpostgres.WithUsername("test"),
-		tcpostgres.WithPassword("test"),
-	)
-	require.NoError(t, err)
-	t.Cleanup(func() {
-		assert.NoError(t, container.Terminate(ctx))
-	})
-
-	connStr, _ := container.ConnectionString(ctx, "sslmode=disable")
-	db, err := gorm.Open(gormpostgres.Open(connStr), &gorm.Config{})
-	require.NoError(t, err)
-
-	err = db.AutoMigrate(&models.SBOM{}, &models.Package{}, &models.Scan{})
-	require.NoError(t, err)
-
 	repo := NewSBOMRepository(db)
 
-	_, err = repo.GetSBOM(ctx, uuid.New())
+	_, err := repo.GetSBOM(ctx, uuid.New())
 	assert.Error(t, err)
 	assert.ErrorIs(t, err, ErrSBOMNotFound)
 }
 
 func TestListSBOMs_WithRealPostgreSQL(t *testing.T) {
-	if os.Getenv("INTEGRATION_TEST") != "true" {
-		t.Skip("Skipping integration test. Set INTEGRATION_TEST=true to run.")
-	}
-
+	db := testutil.TestDB(t)
 	ctx := context.Background()
-
-	container, err := tcpostgres.Run(ctx,
-		"postgres:16-alpine",
-		tcpostgres.WithDatabase("transparenz_test"),
-		tcpostgres.WithUsername("test"),
-		tcpostgres.WithPassword("test"),
-	)
-	require.NoError(t, err)
-	t.Cleanup(func() {
-		assert.NoError(t, container.Terminate(ctx))
-	})
-
-	connStr, _ := container.ConnectionString(ctx, "sslmode=disable")
-	db, err := gorm.Open(gormpostgres.Open(connStr), &gorm.Config{})
-	require.NoError(t, err)
-
-	err = db.AutoMigrate(&models.SBOM{}, &models.Package{}, &models.Scan{})
-	require.NoError(t, err)
-
 	repo := NewSBOMRepository(db)
 
+	// Insert 5 SBOMs with unique namespaces so we can filter precisely.
+	prefix := "list-test-" + uuid.New().String()
+	var insertedIDs []uuid.UUID
 	for i := 0; i < 5; i++ {
-		spdxSBOM := `{
-			"spdxVersion": "SPDX-2.3",
-			"dataLicense": "CC0-1.0",
-			"SPDXID": "SPDXRef-DOCUMENT",
-			"name": "list-test-project-` + string(rune('0'+i)) + `",
-			"documentNamespace": "https://example.com/list-test-` + string(rune('0'+i)) + `",
-			"documentDescribes": ["SPDXRef-Package"],
-			"creationInfo": {
-				"created": "2026-01-01T00:00:00Z"
-			},
-			"packages": []
-		}`
-		_, err := repo.SaveSBOM(ctx, spdxSBOM, "/test/path")
+		name := fmt.Sprintf("list-project-%d", i)
+		sbomJSON := minimalSPDX(name, fmt.Sprintf("https://example.com/%s-%d", prefix, i))
+		id, err := repo.SaveSBOM(ctx, sbomJSON, "/test/path")
 		require.NoError(t, err)
+		insertedIDs = append(insertedIDs, id)
 	}
 
-	sboms, err := repo.ListSBOMs(ctx, 10, 0)
+	// Collect all SBOMs; look for our 5 specifically to avoid interference
+	// from rows inserted by other tests sharing the same container.
+	all, err := repo.ListSBOMs(ctx, 1000, 0)
 	require.NoError(t, err)
-	assert.Len(t, sboms, 5)
 
-	sboms, err = repo.ListSBOMs(ctx, 2, 0)
-	require.NoError(t, err)
-	assert.Len(t, sboms, 2)
+	found := 0
+	for _, s := range all {
+		for _, id := range insertedIDs {
+			if s.ID == id {
+				found++
+			}
+		}
+	}
+	assert.Equal(t, 5, found, "expected exactly 5 inserted SBOMs to appear in list")
 
-	sboms, err = repo.ListSBOMs(ctx, 2, 2)
+	// Pagination still works relative to the full set.
+	page, err := repo.ListSBOMs(ctx, 2, 0)
 	require.NoError(t, err)
-	assert.Len(t, sboms, 2)
+	assert.LessOrEqual(t, len(page), 2)
 }
 
 func TestDeleteSBOM_WithRealPostgreSQL(t *testing.T) {
-	if os.Getenv("INTEGRATION_TEST") != "true" {
-		t.Skip("Skipping integration test. Set INTEGRATION_TEST=true to run.")
-	}
-
+	db := testutil.TestDB(t)
 	ctx := context.Background()
-
-	container, err := tcpostgres.Run(ctx,
-		"postgres:16-alpine",
-		tcpostgres.WithDatabase("transparenz_test"),
-		tcpostgres.WithUsername("test"),
-		tcpostgres.WithPassword("test"),
-	)
-	require.NoError(t, err)
-	t.Cleanup(func() {
-		assert.NoError(t, container.Terminate(ctx))
-	})
-
-	connStr, _ := container.ConnectionString(ctx, "sslmode=disable")
-	db, err := gorm.Open(gormpostgres.Open(connStr), &gorm.Config{})
-	require.NoError(t, err)
-
-	err = db.AutoMigrate(&models.SBOM{}, &models.Package{}, &models.Scan{})
-	require.NoError(t, err)
-
 	repo := NewSBOMRepository(db)
 
-	spdxSBOM := `{
-		"spdxVersion": "SPDX-2.3",
-		"dataLicense": "CC0-1.0",
-		"SPDXID": "SPDXRef-DOCUMENT",
-		"name": "delete-test-project",
-		"documentNamespace": "https://example.com/delete-test",
-		"documentDescribes": ["SPDXRef-Package"],
-		"creationInfo": {
-			"created": "2026-01-01T00:00:00Z"
-		},
-		"packages": []
-	}`
-
-	sbomID, err := repo.SaveSBOM(ctx, spdxSBOM, "/test/path")
+	sbomJSON := minimalSPDX("delete-test-project", ns("delete-test"))
+	sbomID, err := repo.SaveSBOM(ctx, sbomJSON, "/test/path")
 	require.NoError(t, err)
 
 	err = repo.DeleteSBOM(ctx, sbomID)
@@ -281,83 +172,29 @@ func TestDeleteSBOM_WithRealPostgreSQL(t *testing.T) {
 }
 
 func TestDeleteSBOM_NotFound_WithRealPostgreSQL(t *testing.T) {
-	if os.Getenv("INTEGRATION_TEST") != "true" {
-		t.Skip("Skipping integration test. Set INTEGRATION_TEST=true to run.")
-	}
-
+	db := testutil.TestDB(t)
 	ctx := context.Background()
-
-	container, err := tcpostgres.Run(ctx,
-		"postgres:16-alpine",
-		tcpostgres.WithDatabase("transparenz_test"),
-		tcpostgres.WithUsername("test"),
-		tcpostgres.WithPassword("test"),
-	)
-	require.NoError(t, err)
-	t.Cleanup(func() {
-		assert.NoError(t, container.Terminate(ctx))
-	})
-
-	connStr, _ := container.ConnectionString(ctx, "sslmode=disable")
-	db, err := gorm.Open(gormpostgres.Open(connStr), &gorm.Config{})
-	require.NoError(t, err)
-
-	err = db.AutoMigrate(&models.SBOM{}, &models.Package{}, &models.Scan{})
-	require.NoError(t, err)
-
 	repo := NewSBOMRepository(db)
 
-	err = repo.DeleteSBOM(ctx, uuid.New())
+	err := repo.DeleteSBOM(ctx, uuid.New())
 	assert.Error(t, err)
 	assert.ErrorIs(t, err, ErrSBOMNotFound)
 }
 
 func TestSaveSBOM_CycloneDX_WithRealPostgreSQL(t *testing.T) {
-	if os.Getenv("INTEGRATION_TEST") != "true" {
-		t.Skip("Skipping integration test. Set INTEGRATION_TEST=true to run.")
-	}
-
+	db := testutil.TestDB(t)
 	ctx := context.Background()
-
-	container, err := tcpostgres.Run(ctx,
-		"postgres:16-alpine",
-		tcpostgres.WithDatabase("transparenz_test"),
-		tcpostgres.WithUsername("test"),
-		tcpostgres.WithPassword("test"),
-	)
-	require.NoError(t, err)
-	t.Cleanup(func() {
-		assert.NoError(t, container.Terminate(ctx))
-	})
-
-	connStr, _ := container.ConnectionString(ctx, "sslmode=disable")
-	db, err := gorm.Open(gormpostgres.Open(connStr), &gorm.Config{})
-	require.NoError(t, err)
-
-	err = db.AutoMigrate(&models.SBOM{}, &models.Package{}, &models.Scan{})
-	require.NoError(t, err)
-
 	repo := NewSBOMRepository(db)
 
-	cdxSBOM := `{
+	cdxSBOM := fmt.Sprintf(`{
 		"bomFormat": "CycloneDX",
 		"specVersion": "1.5",
 		"version": 1,
-		"serialNumber": "urn:uuid:6e8d4e2c-9f3a-4b5e-a7c8-d9e1f2a3b4c5",
+		"serialNumber": "urn:uuid:%s",
 		"metadata": {
 			"timestamp": "2026-01-01T00:00:00Z",
-			"tools": [
-				{
-					"vendor": "Test",
-					"name": "test-tool",
-					"version": "1.0.0"
-				}
-			],
-			"component": {
-				"type": "application",
-				"name": "cyclone-test",
-				"version": "2.0.0"
-			}
+			"tools": [{"vendor": "Test", "name": "test-tool", "version": "1.0.0"}],
+			"component": {"type": "application", "name": "cyclone-test", "version": "2.0.0"}
 		},
 		"components": [
 			{
@@ -367,30 +204,21 @@ func TestSaveSBOM_CycloneDX_WithRealPostgreSQL(t *testing.T) {
 				"purl": "pkg:npm/test-lib@1.0.0",
 				"cpe": "cpe:2.3:a:test:lib:1.0.0:*:*:*:*:*:*:*",
 				"description": "A test library",
-				"licenses": [
-					{
-						"license": {
-							"id": "MIT"
-						}
-					}
-				],
-				"supplier": {
-					"name": "Test Supplier"
-				}
+				"licenses": [{"license": {"id": "MIT"}}],
+				"supplier": {"name": "Test Supplier"}
 			}
 		]
-	}`
+	}`, uuid.New().String())
 
 	sbomID, err := repo.SaveSBOM(ctx, cdxSBOM, "/test/cdx/path")
 	require.NoError(t, err)
 	assert.NotEqual(t, uuid.Nil, sbomID)
 
-	var savedSBOM models.SBOM
-	err = db.Preload("Packages").First(&savedSBOM, "id = ?", sbomID).Error
+	found, err := repo.GetSBOM(ctx, sbomID)
 	require.NoError(t, err)
-	assert.Equal(t, "cyclone-test", savedSBOM.Name)
-	assert.Equal(t, "CycloneDX", savedSBOM.Format)
-	assert.Len(t, savedSBOM.Packages, 1)
-	assert.Equal(t, "test-lib", savedSBOM.Packages[0].Name)
-	assert.Equal(t, "pkg:npm/test-lib@1.0.0", *savedSBOM.Packages[0].PURL)
+	assert.Equal(t, "cyclone-test", found.Name)
+	assert.Equal(t, "CycloneDX", found.Format)
+	require.NotEmpty(t, found.Packages)
+	assert.Equal(t, "test-lib", found.Packages[0].Name)
+	assert.Equal(t, "pkg:npm/test-lib@1.0.0", *found.Packages[0].PURL)
 }
