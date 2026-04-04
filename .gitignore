@@ -37,6 +37,11 @@ sbom-*.json
 test-*.json
 build.log
 
+# SBOM test results and coverage
+test-results/
+coverage.out
+coverage.html
+
 # Database
 *.db
 *.sqlite

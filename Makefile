@@ -1,4 +1,4 @@
-.PHONY: build test clean install help
+.PHONY: build test clean install help test-100 compare
 
 # Variables
 BINARY_NAME=transparenz
@@ -43,6 +43,12 @@ test-coverage: ## Run tests and report coverage
 
 test-coverage-html: test-coverage ## Open coverage report in browser
 	go tool cover -html=coverage.out
+
+test-100: ## Run SBOM generation against 100 open-source projects
+	cd scripts && bash sbom-100-projects.sh
+
+compare: ## Compare generated SBOMs against upstream references
+	python3 scripts/compare-sboms.py
 
 fmt: ## Format Go code
 	go fmt ./...
