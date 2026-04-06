@@ -89,10 +89,6 @@ fi
 test_cmd "bsi-check SPDX" bsi-check "$TESTDATA/sbom.spdx.json"
 test_cmd "bsi-check CycloneDX" bsi-check "$TESTDATA/sbom.cyclonedx.json"
 
-test_cmd_fail "scan non-existent" scan nonexistent.json
-
-test_output_fail "scan SPDX (no db)" "database" scan "$TESTDATA/sbom.spdx.json" -f json
-
 test_cmd_fail "db migrate (no db)" db migrate
 
 echo ""

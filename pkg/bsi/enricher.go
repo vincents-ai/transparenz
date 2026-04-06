@@ -735,9 +735,8 @@ func (e *Enricher) getKnownLicense(packageName string) string {
 		"golang.org/x/sync":   "BSD-3-Clause",
 		"golang.org/x/sys":    "BSD-3-Clause",
 
-		// Security & scanning - Anchore (project-specific)
+		// Anchore (project-specific)
 		"github.com/anchore/syft":        "Apache-2.0",
-		"github.com/anchore/grype":       "Apache-2.0",
 		"github.com/anchore/stereoscope": "Apache-2.0",
 
 		// Google packages (wildcard handled below)

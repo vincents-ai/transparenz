@@ -1,7 +1,6 @@
 package cmd
 
 import (
-	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -88,67 +87,6 @@ func TestCLI_Generate(t *testing.T) {
 				_, err := os.Stat(filepath.Join(testDir, "testdata/sbom_output.json"))
 				require.NoError(t, err, "output file should exist")
 				os.Remove(filepath.Join(testDir, "testdata/sbom_output.json"))
-			}
-		})
-	}
-}
-
-func TestCLI_Scan(t *testing.T) {
-	cliBin := getCLIBinary(t)
-
-	tests := []struct {
-		name           string
-		args           []string
-		wantErr        bool
-		errContains    string
-		wantJSONFormat bool
-	}{
-		{
-			name:           "scan SPDX SBOM with JSON output",
-			args:           []string{"scan", filepath.Join(testdata, "sbom.spdx.json"), "-f", "json"},
-			wantErr:        true,
-			errContains:    "database",
-			wantJSONFormat: false,
-		},
-		{
-			name:           "scan CycloneDX SBOM with table output",
-			args:           []string{"scan", filepath.Join(testdata, "sbom.cyclonedx.json"), "-f", "table"},
-			wantErr:        true,
-			errContains:    "database",
-			wantJSONFormat: false,
-		},
-		{
-			name:        "scan non-existent file",
-			args:        []string{"scan", "nonexistent.json"},
-			wantErr:     true,
-			errContains: "not found",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			testDir := getTestDir(t)
-			cmd := exec.Command(cliBin, tt.args...)
-			cmd.Dir = testDir
-
-			output, err := cmd.CombinedOutput()
-
-			if tt.wantErr {
-				require.Error(t, err, "command should fail")
-				errStr := string(output)
-				if tt.errContains != "" {
-					require.True(t, strings.Contains(strings.ToLower(errStr), strings.ToLower(tt.errContains)),
-						"error should contain '%s', got: %s", tt.errContains, errStr)
-				}
-				return
-			}
-
-			require.NoError(t, err, "command should succeed, output: %s", truncate(string(output), 200))
-
-			if tt.wantJSONFormat {
-				var result map[string]interface{}
-				err := json.Unmarshal(output, &result)
-				require.NoError(t, err, "output should be valid JSON")
 			}
 		})
 	}
