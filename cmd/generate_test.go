@@ -1,3 +1,5 @@
+//go:build integration
+
 package cmd
 
 import (
@@ -11,9 +13,8 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// TestCLI_Generate_Scope tests the --scope flag on the generate command.
 func TestCLI_Generate_Scope(t *testing.T) {
-	cliBin := getCLIBinary(t)
+	cliBin := requireCLIBinary(t)
 	testDir := getTestDir(t)
 
 	tests := []struct {

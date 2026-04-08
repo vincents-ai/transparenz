@@ -1,3 +1,5 @@
+//go:build integration
+
 package cmd
 
 import (
@@ -10,31 +12,8 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-const testdata = "./testdata"
-
-func getTestDir(t *testing.T) string {
-	cwd, err := os.Getwd()
-	require.NoError(t, err)
-
-	// If we're in cmd directory, return parent (transparenz-go)
-	if filepath.Base(cwd) == "cmd" {
-		return filepath.Dir(cwd)
-	}
-
-	// If we're already in transparenz-go root
-	if filepath.Base(cwd) == "transparenz-go" {
-		return cwd
-	}
-
-	return cwd
-}
-
-func getCLIBinary(t *testing.T) string {
-	return filepath.Join(getTestDir(t), "transparenz")
-}
-
 func TestCLI_Generate(t *testing.T) {
-	cliBin := getCLIBinary(t)
+	cliBin := requireCLIBinary(t)
 
 	tests := []struct {
 		name       string
@@ -93,7 +72,7 @@ func TestCLI_Generate(t *testing.T) {
 }
 
 func TestCLI_BSICheck(t *testing.T) {
-	cliBin := getCLIBinary(t)
+	cliBin := requireCLIBinary(t)
 
 	tests := []struct {
 		name    string
@@ -145,7 +124,7 @@ func TestCLI_BSICheck(t *testing.T) {
 }
 
 func TestCLI_DbMigrate(t *testing.T) {
-	cliBin := getCLIBinary(t)
+	cliBin := requireCLIBinary(t)
 
 	tests := []struct {
 		name    string
@@ -174,7 +153,7 @@ func TestCLI_DbMigrate(t *testing.T) {
 }
 
 func TestCLI_Version(t *testing.T) {
-	cliBin := getCLIBinary(t)
+	cliBin := requireCLIBinary(t)
 	testDir := getTestDir(t)
 
 	cmd := exec.Command(cliBin, "--version")
@@ -188,7 +167,7 @@ func TestCLI_Version(t *testing.T) {
 }
 
 func TestCLI_Help(t *testing.T) {
-	cliBin := getCLIBinary(t)
+	cliBin := requireCLIBinary(t)
 	testDir := getTestDir(t)
 
 	cmd := exec.Command(cliBin, "--help")
@@ -205,7 +184,7 @@ func TestCLI_Help(t *testing.T) {
 }
 
 func TestCLI_Root(t *testing.T) {
-	cliBin := getCLIBinary(t)
+	cliBin := requireCLIBinary(t)
 	testDir := getTestDir(t)
 
 	cmd := exec.Command(cliBin)
@@ -214,11 +193,4 @@ func TestCLI_Root(t *testing.T) {
 	output, err := cmd.CombinedOutput()
 	require.NoError(t, err, "root command should work")
 	require.True(t, len(output) > 0, "should have some output")
-}
-
-func truncate(s string, maxLen int) string {
-	if len(s) <= maxLen {
-		return s
-	}
-	return s[:maxLen] + "..."
 }

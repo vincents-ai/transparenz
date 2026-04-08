@@ -20,8 +20,14 @@ jobs:
       - name: Install dependencies
         run: go mod download
 
-      - name: Run tests
+      - name: Run unit tests
         run: go test -v -race -coverprofile=coverage.txt -covermode=atomic ./...
+
+      - name: Build binary for integration tests
+        run: go build -o transparenz .
+
+      - name: Run integration tests
+        run: go test -v -race -tags integration ./cmd/
 
       - name: Upload coverage
         uses: codecov/codecov-action@v4
