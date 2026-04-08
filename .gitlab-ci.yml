@@ -29,7 +29,7 @@ lint:
   stage: test
   image: golang:${GOLANG_VERSION}
   before_script:
-    - go install golang.org/dl/golang${GOLANG_VERSION}@latest
+    - go install golang.org/dl/golang${GOLANG_VERSION}
     - go${GOLANG_VERSION} download
   script:
     - go vet ./...
