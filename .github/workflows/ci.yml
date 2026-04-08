@@ -71,3 +71,29 @@ jobs:
         run: |
           git remote add gitlab-mirror https://oauth2:${GITLAB_TOKEN}@gitlab.opencode.de/oc000136194430/transparenz.git
           git push gitlab-mirror HEAD:main
+
+  self-sbom:
+    name: Generate self-SBOM
+    runs-on: ubuntu-latest
+    needs: [build]
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.25.8'
+
+      - name: Build
+        run: go build -o transparenz .
+
+      - name: Generate self-SBOM
+        run: ./transparenz generate --format cyclonedx-json --output transparenz-sbom.json .
+
+      - name: Upload SBOM artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: transparenz-sbom
+          path: transparenz-sbom.json
+          retention-days: 30
