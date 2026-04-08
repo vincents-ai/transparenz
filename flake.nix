@@ -24,8 +24,9 @@
             "-w" 
             "-X main.version=0.1.0" 
           ];
-          
-          subPackages = [ "cmd/transparenz" ];
+
+          # Build root package (main.go at repo root)
+          # subPackages = [ "cmd/transparenz" ] — does not exist, entry is ./
           
           meta = with pkgs.lib; {
             description = "BSI TR-03183 compliant SBOM generator (Native Go)";

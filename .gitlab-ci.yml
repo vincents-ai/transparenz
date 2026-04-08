@@ -3,7 +3,7 @@ stages:
   - build
 
 variables:
-  GOLANG_VERSION: "1.21"
+  GOLANG_VERSION: "1.25"
   CGO_ENABLED: "0"
 
 .go-cache:
@@ -40,7 +40,7 @@ bsi-compliance-tests:
   stage: test
   image: golang:${GOLANG_VERSION}
   script:
-    - go build -o transparenz ./cmd/transparenz
+    - go build -o transparenz .
     - ./tests/run-bdd-tests.sh features/BSI_TR03183_*.feature
   artifacts:
     reports:
@@ -54,9 +54,9 @@ build:
   stage: build
   image: golang:${GOLANG_VERSION}-alpine
   script:
-    - CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" -o transparenz-linux-amd64 ./cmd/transparenz
-    - CGO_ENABLED=0 GOOS=darwin GOARCH=amd64 go build -ldflags="-s -w" -o transparenz-darwin-amd64 ./cmd/transparenz
-    - CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build -ldflags="-s -w" -o transparenz-darwin-arm64 ./cmd/transparenz
+    - CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" -o transparenz-linux-amd64 .
+    - CGO_ENABLED=0 GOOS=darwin GOARCH=amd64 go build -ldflags="-s -w" -o transparenz-darwin-amd64 .
+    - CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build -ldflags="-s -w" -o transparenz-darwin-arm64 .
   artifacts:
     paths:
       - transparenz-*

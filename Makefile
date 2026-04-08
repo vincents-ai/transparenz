@@ -3,7 +3,7 @@
 # Variables
 BINARY_NAME=transparenz
 BUILD_DIR=build
-CMD_DIR=cmd/transparenz
+CMD_DIR=.
 VERSION?=0.1.0
 COMMIT=$(shell git rev-parse --short HEAD 2>/dev/null || echo "unknown")
 BUILD_TIME=$(shell date -u '+%Y-%m-%d_%H:%M:%S')

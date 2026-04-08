@@ -55,7 +55,7 @@ pkgs.nixosTest ({
 
     # Test 4: Generate SBOM and store in database
     client.succeed("mkdir -p /tmp/test-project")
-    client.succeed("cp -r ${pkgs.transparenz-go.src}/cmd/transparenz/* /tmp/test-project/")
+    client.succeed("cp -r ${pkgs.transparenz-go.src}/cmd/* /tmp/test-project/")
     client.succeed("cd /tmp/test-project && transparenz generate . --format cyclonedx --output /tmp/test-sbom.json")
     client.succeed("test -f /tmp/test-sbom.json")
 
