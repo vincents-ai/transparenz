@@ -5,6 +5,7 @@ import (
 	"os"
 
 	"github.com/spf13/cobra"
+	"github.com/spf13/viper"
 )
 
 var (
@@ -33,8 +34,37 @@ func Execute() {
 }
 
 func init() {
-	// TODO: implement config file loading (e.g. using github.com/spf13/viper)
-	// cfgFile is currently unused.
+	cobra.OnInitialize(initConfig)
 	rootCmd.PersistentFlags().StringVarP(&cfgFile, "config", "c", "", "Config file (default is $HOME/.transparenz.yaml)")
 	rootCmd.PersistentFlags().BoolVarP(&verbose, "verbose", "v", false, "Enable verbose output")
+}
+
+// initConfig reads the configuration file and environment variables.
+// If --config is provided, that file is used; otherwise the default
+// $HOME/.transparenz.yaml is loaded when present.
+// Environment variables prefixed with TRANSPARENZ_ override all file values.
+func initConfig() {
+	if cfgFile != "" {
+		viper.SetConfigFile(cfgFile)
+	} else {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "warning: could not determine home directory:", err)
+		} else {
+			viper.AddConfigPath(home)
+		}
+		viper.AddConfigPath(".")
+		viper.SetConfigName(".transparenz")
+		viper.SetConfigType("yaml")
+	}
+
+	viper.SetEnvPrefix("TRANSPARENZ")
+	viper.AutomaticEnv()
+
+	if err := viper.ReadInConfig(); err != nil {
+		// Config file not found is not an error — it's optional.
+		if _, ok := err.(viper.ConfigFileNotFoundError); !ok {
+			fmt.Fprintln(os.Stderr, "warning: could not read config file:", err)
+		}
+	}
 }
