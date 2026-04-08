@@ -1215,15 +1215,20 @@ func (e *Enricher) enrichCycloneDXWithArtifactHashes(components []interface{}, a
 
 		name := getString(comp, "name")
 		if hash, ok := artifactHashes[name]; ok {
-			hashes, ok := comp["hashes"].([]interface{})
+			extRefs, ok := comp["externalReferences"].([]interface{})
 			if !ok {
-				hashes = []interface{}{}
+				extRefs = []interface{}{}
 			}
-			hashes = append(hashes, map[string]interface{}{
-				"alg":     "SHA-512",
-				"content": hash,
+			extRefs = append(extRefs, map[string]interface{}{
+				"type": "distribution",
+				"hashes": []interface{}{
+					map[string]interface{}{
+						"alg":     "SHA-512",
+						"content": hash,
+					},
+				},
 			})
-			comp["hashes"] = hashes
+			comp["externalReferences"] = extRefs
 		}
 		components[i] = comp
 	}
@@ -1274,14 +1279,14 @@ func (e *Enricher) enrichSPDXWithArtifactHashes(packages []interface{}, artifact
 }
 
 // EnrichWithBinaryHash computes the SHA-512 of a single binary file and
-// injects it into the SBOM's metadata.component.hashes (CycloneDX) or
+// injects it into the SBOM's metadata.component.externalReferences (CycloneDX) or
 // the primary package checksums (SPDX). This is the BSI TR-03183-2 §4.3
 // single-artifact shortcut for tools producing one binary.
 //
 // For CycloneDX SBOMs the SHA-512 entry is added (or replaced) inside
-// metadata.component.hashes:
+// metadata.component.externalReferences[].hashes with type "distribution":
 //
-//	[{"alg": "SHA-512", "content": "<hex>"}]
+//	[{"type": "distribution", "hashes": [{"alg": "SHA-512", "content": "<hex>"}]}]
 //
 // For SPDX SBOMs the entry is appended to the first package whose name
 // matches the binary filename; if no package matches, the first package is
@@ -1314,9 +1319,9 @@ func (e *Enricher) EnrichWithBinaryHash(sbomJSON string, binaryPath string) (str
 	return string(enriched), nil
 }
 
-// injectBinaryHashCycloneDX injects the SHA-512 into metadata.component.hashes.
+// injectBinaryHashCycloneDX injects the SHA-512 into metadata.component.externalReferences.
 // If metadata or metadata.component does not exist, it is created.
-// An existing SHA-512 entry in the hashes array is replaced.
+// An existing distribution entry with SHA-512 is replaced.
 func (e *Enricher) injectBinaryHashCycloneDX(sbomData map[string]interface{}, hash string) {
 	metadata, ok := sbomData["metadata"].(map[string]interface{})
 	if !ok {
@@ -1330,22 +1335,26 @@ func (e *Enricher) injectBinaryHashCycloneDX(sbomData map[string]interface{}, ha
 		metadata["component"] = component
 	}
 
-	// Build new hashes array: preserve non-SHA-512 entries, replace/add SHA-512
-	existing, _ := component["hashes"].([]interface{})
-	hashes := make([]interface{}, 0, len(existing)+1)
-	for _, h := range existing {
-		if hm, ok := h.(map[string]interface{}); ok {
-			if getString(hm, "alg") == "SHA-512" {
-				continue // will be replaced below
+	existing, _ := component["externalReferences"].([]interface{})
+	extRefs := make([]interface{}, 0, len(existing)+1)
+	for _, ref := range existing {
+		if refMap, ok := ref.(map[string]interface{}); ok {
+			if getString(refMap, "type") == "distribution" {
+				continue
 			}
 		}
-		hashes = append(hashes, h)
+		extRefs = append(extRefs, ref)
 	}
-	hashes = append(hashes, map[string]interface{}{
-		"alg":     "SHA-512",
-		"content": hash,
+	extRefs = append(extRefs, map[string]interface{}{
+		"type": "distribution",
+		"hashes": []interface{}{
+			map[string]interface{}{
+				"alg":     "SHA-512",
+				"content": hash,
+			},
+		},
 	})
-	component["hashes"] = hashes
+	component["externalReferences"] = extRefs
 }
 
 // injectBinaryHashSPDX appends a SHA-512 checksum to the best-matching SPDX package.

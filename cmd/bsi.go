@@ -266,37 +266,38 @@ func validateBSICompliance(sbomData map[string]interface{}) map[string]interface
 				}
 			}
 		} else {
-			// CycloneDX format: "hashes": [{"alg": "SHA-512", "content": "..."}]
-			if hashes, ok := pkgMap["hashes"].([]interface{}); ok && len(hashes) > 0 {
-				for _, h := range hashes {
-					if hMap, ok := h.(map[string]interface{}); ok {
-						if alg, ok := hMap["alg"].(string); ok {
-							if content, ok := hMap["content"].(string); ok {
-								// Check SHA-512
-								if alg == "SHA-512" {
-									// Primary: content is a 128-char hex string (written by enricher via hex.EncodeToString)
-									if sha512Regex.MatchString(content) {
-										hasSha512 = true
-										hasAnyHash = true
-									} else {
-										// Fallback: base64-encoded raw bytes (SBOMs from other tools)
-										decoded, err := base64.StdEncoding.DecodeString(content)
-										if err == nil && sha512Regex.MatchString(hex.EncodeToString(decoded)) {
-											hasSha512 = true
-											hasAnyHash = true
-										}
-									}
-								}
-								// Check SHA-256
-								if alg == "SHA-256" {
-									// Primary: content is a 64-char hex string
-									if sha256Regex.MatchString(content) {
-										hasAnyHash = true
-									} else {
-										// Fallback: base64-encoded raw bytes
-										decoded, err := base64.StdEncoding.DecodeString(content)
-										if err == nil && sha256Regex.MatchString(hex.EncodeToString(decoded)) {
-											hasAnyHash = true
+			if extRefs, ok := pkgMap["externalReferences"].([]interface{}); ok && len(extRefs) > 0 {
+				for _, ref := range extRefs {
+					if refMap, ok := ref.(map[string]interface{}); ok {
+						if refType, ok := refMap["type"].(string); ok && refType == "distribution" {
+							if hashes, ok := refMap["hashes"].([]interface{}); ok && len(hashes) > 0 {
+								for _, h := range hashes {
+									if hMap, ok := h.(map[string]interface{}); ok {
+										if alg, ok := hMap["alg"].(string); ok {
+											if content, ok := hMap["content"].(string); ok {
+												if alg == "SHA-512" {
+													if sha512Regex.MatchString(content) {
+														hasSha512 = true
+														hasAnyHash = true
+													} else {
+														decoded, err := base64.StdEncoding.DecodeString(content)
+														if err == nil && sha512Regex.MatchString(hex.EncodeToString(decoded)) {
+															hasSha512 = true
+															hasAnyHash = true
+														}
+													}
+												}
+												if alg == "SHA-256" {
+													if sha256Regex.MatchString(content) {
+														hasAnyHash = true
+													} else {
+														decoded, err := base64.StdEncoding.DecodeString(content)
+														if err == nil && sha256Regex.MatchString(hex.EncodeToString(decoded)) {
+															hasAnyHash = true
+														}
+													}
+												}
+											}
 										}
 									}
 								}
