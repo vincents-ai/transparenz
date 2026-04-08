@@ -23,6 +23,8 @@ var validSHA512 = strings.Repeat("a", 128)
 var validSHA256 = strings.Repeat("b", 64)
 
 // fullyCompliantCycloneDXJSON is a CycloneDX 1.6 SBOM with all BSI requirements met.
+// SHA-512 hash is placed in externalReferences[type=distribution].hashes as required
+// by the BSI TR-03183-2 check in cmd/bsi.go (see bsi.go lines 269-308).
 const fullyCompliantCycloneDXJSON = `{
   "bomFormat": "CycloneDX",
   "specVersion": "1.6",
@@ -38,9 +40,15 @@ const fullyCompliantCycloneDXJSON = `{
       "name": "somelib",
       "version": "2.0.0",
       "purl": "pkg:golang/somelib@2.0.0",
-      "hashes": [{"alg": "SHA-512", "content": "PLACEHOLDER_SHA512"}],
       "licenses": [{"license": {"id": "MIT"}}],
       "supplier": {"name": "Test Org"},
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://example.com/somelib-2.0.0.tar.gz",
+          "hashes": [{"alg": "SHA-512", "content": "PLACEHOLDER_SHA512"}]
+        }
+      ],
       "properties": [
         {"name": "executable", "value": "false"},
         {"name": "archive", "value": "false"},
@@ -390,6 +398,8 @@ func TestRunBSICheck_EmptyJSON(t *testing.T) {
 //
 // Score = 100*0.30 + 0*0.25 + 0*0.15 + 0*0.15 + 100*0.10 + 100*0.05 = 45.0
 func TestValidateBSICompliance_ScoreWeighting(t *testing.T) {
+	// SHA-512 in externalReferences[type=distribution].hashes as required by bsi.go.
+	// No license, supplier, or properties — so only hash/completeness/format scores.
 	sbomJSON := strings.ReplaceAll(`{
 		"bomFormat": "CycloneDX",
 		"specVersion": "1.6",
@@ -401,7 +411,13 @@ func TestValidateBSICompliance_ScoreWeighting(t *testing.T) {
 				"type": "library",
 				"name": "weightlib",
 				"version": "1.0.0",
-				"hashes": [{"alg": "SHA-512", "content": "PLACEHOLDER_SHA512"}]
+				"externalReferences": [
+					{
+						"type": "distribution",
+						"url": "https://example.com/weightlib-1.0.0.tar.gz",
+						"hashes": [{"alg": "SHA-512", "content": "PLACEHOLDER_SHA512"}]
+					}
+				]
 			}
 		]
 	}`, "PLACEHOLDER_SHA512", validSHA512)
