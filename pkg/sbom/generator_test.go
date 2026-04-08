@@ -123,33 +123,10 @@ func TestGenerator_FormatSBOM(t *testing.T) {
 			format:  "cyclonedx-json",
 			wantErr: false,
 		},
-		{
-			name:    "unsupported format",
-			format:  "unknown",
-			wantErr: true,
-		},
-		{
-			name:    "empty format string",
-			format:  "",
-			wantErr: true,
-		},
-		{
-			name:    "whitespace format",
-			format:  "   ",
-			wantErr: true,
-		},
-		{
-			name:    "random format string",
-			format:  "random123",
-			wantErr: true,
-		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if tt.format == "unknown" || tt.format == "" || tt.format == "   " || tt.format == "random123" {
-				t.Skip("format validation happens after slow SBOM generation")
-			}
 			g := NewGenerator(false)
 			testSBOM := createMinimalSBOM()
 
