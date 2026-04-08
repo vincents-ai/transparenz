@@ -47,3 +47,9 @@ coverage.html
 *.sqlite
 *.sqlite3
 .pgdata/
+
+# Engram
+.engram/
+
+# Symlinks
+vulnz-go-link
