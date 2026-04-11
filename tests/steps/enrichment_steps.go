@@ -47,6 +47,17 @@ func theEnrichedSBOMHasSHA512Hashes(ctx context.Context) error {
 	if err := json.Unmarshal(data, &sbom); err != nil {
 		return fmt.Errorf("enriched SBOM is not valid JSON: %w", err)
 	}
+
+	checkHashes := func(hashes []interface{}) bool {
+		for _, h := range hashes {
+			hMap, _ := h.(map[string]interface{})
+			if hMap != nil && hMap["alg"] == "SHA-512" {
+				return true
+			}
+		}
+		return false
+	}
+
 	components, ok := sbom["components"].([]interface{})
 	if !ok {
 		return fmt.Errorf("no components in enriched SBOM")
@@ -57,15 +68,44 @@ func theEnrichedSBOMHasSHA512Hashes(ctx context.Context) error {
 			continue
 		}
 		if hashes, ok := comp["hashes"].([]interface{}); ok {
-			for _, h := range hashes {
-				hMap, _ := h.(map[string]interface{})
-				if hMap != nil && hMap["alg"] == "SHA-512" {
-					return nil
+			if checkHashes(hashes) {
+				return nil
+			}
+		}
+		if extRefs, ok := comp["externalReferences"].([]interface{}); ok {
+			for _, ref := range extRefs {
+				refMap, _ := ref.(map[string]interface{})
+				if refMap == nil {
+					continue
+				}
+				if hashes, ok := refMap["hashes"].([]interface{}); ok {
+					if checkHashes(hashes) {
+						return nil
+					}
 				}
 			}
 		}
 	}
-	return fmt.Errorf("no SHA-512 hashes found in enriched SBOM")
+
+	if metadata, ok := sbom["metadata"].(map[string]interface{}); ok {
+		if mc, ok := metadata["component"].(map[string]interface{}); ok {
+			if extRefs, ok := mc["externalReferences"].([]interface{}); ok {
+				for _, ref := range extRefs {
+					refMap, _ := ref.(map[string]interface{})
+					if refMap == nil {
+						continue
+					}
+					if hashes, ok := refMap["hashes"].([]interface{}); ok {
+						if checkHashes(hashes) {
+							return nil
+						}
+					}
+				}
+			}
+		}
+	}
+
+	return fmt.Errorf("no SHA-512 hashes found in enriched SBOM (checked components[*].hashes, components[*].externalReferences[*].hashes, and metadata.component.externalReferences[*].hashes)")
 }
 
 func anSBOMFileExistsWithSHA256OnlyHashes(ctx context.Context) error {

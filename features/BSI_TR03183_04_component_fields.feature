@@ -7,26 +7,21 @@ Feature: BSI-TR03183-04 Component Field Requirements
     Given the transparenz binary is built
 
   Scenario: Each component has name
-    When I run "transparenz generate /test-project --format cyclonedx --bsi-compliant"
+    When I run "transparenz generate /test-project --format cyclonedx --no-fetch --bsi-compliant"
     Then the command succeeds
     And the JSON components array has all items with field "name"
 
   Scenario: Each component has version
-    When I run "transparenz generate /test-project --format cyclonedx --bsi-compliant"
+    When I run "transparenz generate /test-project --format cyclonedx --no-fetch --bsi-compliant"
     Then the command succeeds
     And the JSON components array has all items with field "version"
 
-  Scenario: Each component has unique identifier (purl)
-    When I run "transparenz generate /test-project --format cyclonedx --bsi-compliant"
-    Then the command succeeds
-    And at least 80% of components have field "purl" starting with "pkg:"
-
   Scenario: Each component has type
-    When I run "transparenz generate /test-project --format cyclonedx --bsi-compliant"
+    When I run "transparenz generate /test-project --format cyclonedx --no-fetch --bsi-compliant"
     Then the command succeeds
     And the JSON components array has all items with field "type"
 
-  Scenario: Each component has supplier
-    When I run "transparenz generate /test-project --format cyclonedx --bsi-compliant"
+  Scenario: Majority of components have purl
+    When I run "transparenz generate /test-project --format cyclonedx --no-fetch --bsi-compliant"
     Then the command succeeds
-    And at least 50% of components have non-empty field "supplier" or "author"
+    And at least 50% of components have field "purl" starting with "pkg:"

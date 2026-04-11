@@ -1006,9 +1006,9 @@ func TestEnrichWithArtifactHashes(t *testing.T) {
 
 		components := sbomData["components"].([]interface{})
 		comp := components[0].(map[string]interface{})
-		hashes, ok := comp["hashes"].([]interface{})
-		if !ok || len(hashes) == 0 {
-			t.Error("Expected hashes to be added")
+		extRefs, ok := comp["externalReferences"].([]interface{})
+		if !ok || len(extRefs) == 0 {
+			t.Error("Expected externalReferences with hashes to be added")
 		}
 	})
 
@@ -1093,9 +1093,9 @@ func TestEnrichCycloneDXWithArtifactHashes(t *testing.T) {
 	}
 
 	comp := components[0].(map[string]interface{})
-	hashes, ok := comp["hashes"].([]interface{})
-	if !ok || len(hashes) == 0 {
-		t.Error("Expected hashes for matching artifact")
+	extRefs, ok := comp["externalReferences"].([]interface{})
+	if !ok || len(extRefs) == 0 {
+		t.Error("Expected externalReferences with hashes for matching artifact")
 	}
 }
 
@@ -1367,24 +1367,40 @@ func TestEnrichWithBinaryHash_CycloneDX(t *testing.T) {
 	if !ok {
 		t.Fatal("metadata.component must be present and be a map")
 	}
-	hashes, ok := component["hashes"].([]interface{})
-	if !ok || len(hashes) == 0 {
-		t.Fatal("metadata.component.hashes must be a non-empty array")
+	extRefs, ok := component["externalReferences"].([]interface{})
+	if !ok || len(extRefs) == 0 {
+		t.Fatal("metadata.component.externalReferences must be a non-empty array")
 	}
 
 	found := false
-	for _, h := range hashes {
-		hm, ok := h.(map[string]interface{})
+	for _, ref := range extRefs {
+		refMap, ok := ref.(map[string]interface{})
 		if !ok {
 			continue
 		}
-		if hm["alg"] == "SHA-512" && hm["content"] == expectedHash {
-			found = true
+		if refMap["type"] != "distribution" {
+			continue
+		}
+		hashes, ok := refMap["hashes"].([]interface{})
+		if !ok {
+			continue
+		}
+		for _, h := range hashes {
+			hm, ok := h.(map[string]interface{})
+			if !ok {
+				continue
+			}
+			if hm["alg"] == "SHA-512" && hm["content"] == expectedHash {
+				found = true
+				break
+			}
+		}
+		if found {
 			break
 		}
 	}
 	if !found {
-		t.Errorf("Expected SHA-512 hash %s in metadata.component.hashes, got %v", expectedHash, hashes)
+		t.Errorf("Expected SHA-512 hash %s in metadata.component.externalReferences[type=distribution].hashes, got %v", expectedHash, extRefs)
 	}
 }
 
@@ -1422,9 +1438,9 @@ func TestEnrichWithBinaryHash_CycloneDX_NoMetadata(t *testing.T) {
 	if !ok {
 		t.Fatal("metadata.component should be created when absent")
 	}
-	hashes, ok := component["hashes"].([]interface{})
-	if !ok || len(hashes) == 0 {
-		t.Fatal("Expected hashes to be added")
+	extRefs, ok := component["externalReferences"].([]interface{})
+	if !ok || len(extRefs) == 0 {
+		t.Fatal("Expected externalReferences to be added")
 	}
 }
 
@@ -1442,15 +1458,15 @@ func TestEnrichWithBinaryHash_CycloneDX_ReplacesExistingHash(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// SBOM already has an old SHA-512 and an MD5 entry
+	// SBOM already has an old distribution ref with SHA-512 and a non-distribution ref
 	sbomJSON := `{
 		"bomFormat": "CycloneDX",
 		"specVersion": "1.6",
 		"metadata": {
 			"component": {
-				"hashes": [
-					{"alg": "MD5",    "content": "deadbeef"},
-					{"alg": "SHA-512","content": "oldoldoldold"}
+				"externalReferences": [
+					{"type": "website", "url": "https://example.com"},
+					{"type": "distribution", "hashes": [{"alg": "SHA-512","content": "oldoldoldold"}]}
 				]
 			}
 		},
@@ -1467,24 +1483,44 @@ func TestEnrichWithBinaryHash_CycloneDX_ReplacesExistingHash(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	hashes := parsed["metadata"].(map[string]interface{})["component"].(map[string]interface{})["hashes"].([]interface{})
+	extRefs := parsed["metadata"].(map[string]interface{})["component"].(map[string]interface{})["externalReferences"].([]interface{})
 
-	// MD5 must be preserved; old SHA-512 must be replaced
-	foundMD5 := false
-	for _, h := range hashes {
-		hm := h.(map[string]interface{})
-		if hm["alg"] == "MD5" {
-			foundMD5 = true
+	foundNewHash := false
+	foundWebsite := false
+	for _, ref := range extRefs {
+		refMap, ok := ref.(map[string]interface{})
+		if !ok {
+			continue
 		}
-		if hm["alg"] == "SHA-512" && hm["content"] == "oldoldoldold" {
-			t.Error("old SHA-512 should have been replaced")
+		if refMap["type"] == "website" {
+			foundWebsite = true
+			continue
 		}
-		if hm["alg"] == "SHA-512" && hm["content"] == newHash {
-			// good
+		if refMap["type"] != "distribution" {
+			continue
+		}
+		refHashes, ok := refMap["hashes"].([]interface{})
+		if !ok {
+			continue
+		}
+		for _, h := range refHashes {
+			hm, ok := h.(map[string]interface{})
+			if !ok {
+				continue
+			}
+			if hm["alg"] == "SHA-512" && hm["content"] == "oldoldoldold" {
+				t.Error("old SHA-512 should have been replaced")
+			}
+			if hm["alg"] == "SHA-512" && hm["content"] == newHash {
+				foundNewHash = true
+			}
 		}
 	}
-	if !foundMD5 {
-		t.Error("MD5 entry should be preserved")
+	if !foundNewHash {
+		t.Error("new SHA-512 hash should be present in distribution ref")
+	}
+	if !foundWebsite {
+		t.Error("non-distribution externalReference should be preserved")
 	}
 }
 

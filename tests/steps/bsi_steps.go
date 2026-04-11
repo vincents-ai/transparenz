@@ -17,6 +17,8 @@ func RegisterBSISteps(s *godog.ScenarioContext) {
 	s.Step(`^the JSON report has field "([^"]*)" with string$`, theJSONReportHasFieldWithString)
 	s.Step(`^the JSON report metadata has field "([^"]*)" equal to "([^"]*)"$`, theJSONReportMetadataHasFieldEqualTo)
 	s.Step(`^the bsi-check report has "([^"]*)" at least (\d+)%$`, theBsiCheckReportHasFieldAtLeastPercent)
+	s.Step(`^the JSON report has field "([^"]*)" equal to "([^"]*)"$`, theJSONReportHasFieldEqualTo)
+	s.Step(`^the JSON report field "([^"]*)" is a non-empty array$`, theJSONReportFieldIsANonEmptyArray)
 }
 
 // ─── Step implementations ─────────────────────────────────────────────────────
@@ -81,6 +83,40 @@ func theJSONReportMetadataHasFieldEqualTo(ctx context.Context, field, expected s
 	}
 	if fmt.Sprintf("%v", val) != expected {
 		return fmt.Errorf("metadata %q: expected %q, got %v", field, expected, val)
+	}
+	return nil
+}
+
+func theJSONReportHasFieldEqualTo(ctx context.Context, field, expected string) error {
+	m, ok := ctx.Value(KeyReportJSON).(map[string]interface{})
+	if !ok {
+		return fmt.Errorf("report JSON is not an object")
+	}
+	val, exists := m[field]
+	if !exists {
+		return fmt.Errorf("report field %q not found", field)
+	}
+	if fmt.Sprintf("%v", val) != expected {
+		return fmt.Errorf("report field %q: expected %q, got %v", field, expected, val)
+	}
+	return nil
+}
+
+func theJSONReportFieldIsANonEmptyArray(ctx context.Context, field string) error {
+	m, ok := ctx.Value(KeyReportJSON).(map[string]interface{})
+	if !ok {
+		return fmt.Errorf("report JSON is not an object")
+	}
+	val, exists := m[field]
+	if !exists {
+		return fmt.Errorf("report field %q not found", field)
+	}
+	arr, ok := val.([]interface{})
+	if !ok {
+		return fmt.Errorf("report field %q is not an array", field)
+	}
+	if len(arr) == 0 {
+		return fmt.Errorf("report field %q is empty", field)
 	}
 	return nil
 }

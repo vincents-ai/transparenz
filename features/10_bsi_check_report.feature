@@ -7,7 +7,7 @@ Feature: CRA-06 BSI Compliance Check Report
     Given the transparenz binary is built
 
   Scenario: BSI check produces a structured report
-    When I run "transparenz generate /test-project --format cyclonedx --bsi-compliant -o sbom.json"
+    When I run "transparenz generate /test-project --format cyclonedx --no-fetch --bsi-compliant -o sbom.json"
     And I run "transparenz bsi-check sbom.json"
     Then the command succeeds
     And the JSON report has field "compliant" with boolean
@@ -20,7 +20,19 @@ Feature: CRA-06 BSI Compliance Check Report
     And the JSON report has field "format_version" with string
 
   Scenario: BSI check validates SHA-512 requirement
-    When I run "transparenz generate /test-project --format cyclonedx --bsi-compliant -o sbom.json"
+    When I run "transparenz generate /test-project --format cyclonedx --no-fetch --bsi-compliant -o sbom.json"
     And I run "transparenz bsi-check sbom.json"
     Then the command succeeds
     And the JSON report metadata has field "standard" equal to "BSI TR-03183-2"
+
+  Scenario: BSI check report has findings array
+    When I run "transparenz generate /test-project --format cyclonedx --no-fetch --bsi-compliant -o sbom.json"
+    And I run "transparenz bsi-check sbom.json"
+    Then the command succeeds
+    And the JSON report has field "findings_count" with number
+
+  Scenario: BSI check report has total components
+    When I run "transparenz generate /test-project --format cyclonedx --no-fetch --bsi-compliant -o sbom.json"
+    And I run "transparenz bsi-check sbom.json"
+    Then the command succeeds
+    And the JSON report has field "total_components" with number

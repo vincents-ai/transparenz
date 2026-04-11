@@ -33,7 +33,7 @@ func TestMain(m *testing.M) {
 	defer os.RemoveAll(tmpDir)
 
 	prebuiltBinary = filepath.Join(tmpDir, "transparenz")
-	cmd := exec.Command("go", "build", "-o", prebuiltBinary, "../cmd/transparenz")
+	cmd := exec.Command("go", "build", "-o", prebuiltBinary, "..")
 	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {
 		fmt.Fprintf(os.Stderr, "Failed to build binary: %v\n", err)
@@ -81,6 +81,7 @@ func InitializeScenario(s *godog.ScenarioContext) {
 	s.Step(`^the transparenz binary is built$`, theTransparenzBinaryIsBuilt)
 	s.Step(`^I run "([^"]*)"$`, iRun)
 	s.Step(`^the command succeeds$`, theCommandSucceeds)
+	s.Step(`^the command fails$`, theCommandFails)
 
 	// Domain step sets.
 	steps.RegisterSBOMSteps(s)
@@ -115,7 +116,7 @@ func iRun(ctx context.Context, command string) (context.Context, error) {
 
 	tmpDir := getTmpDir(ctx)
 	for i, p := range parts {
-		if p == "-o" || p == "--output" || p == "--artifacts" {
+		if p == "-o" || p == "--output" || p == "--artifacts" || p == "--binary" {
 			if i+1 < len(parts) && !filepath.IsAbs(parts[i+1]) {
 				parts[i+1] = filepath.Join(tmpDir, parts[i+1])
 			}
@@ -123,8 +124,11 @@ func iRun(ctx context.Context, command string) (context.Context, error) {
 		if p == "sbom.json" {
 			parts[i] = filepath.Join(tmpDir, "sbom.json")
 		}
-		if p == "artifacts/" {
+		if p == "artifacts/" || p == "artifacts" {
 			parts[i] = filepath.Join(tmpDir, "artifacts")
+		}
+		if strings.HasPrefix(p, "artifacts/") {
+			parts[i] = filepath.Join(tmpDir, p)
 		}
 	}
 
@@ -171,6 +175,14 @@ func theCommandSucceeds(ctx context.Context) error {
 	if err, ok := ctx.Value(steps.KeyCmdErr).(error); ok && err != nil {
 		out, _ := ctx.Value(steps.KeyCmdOut).(string)
 		return fmt.Errorf("command failed: %w\nOutput: %s", err, out)
+	}
+	return nil
+}
+
+func theCommandFails(ctx context.Context) error {
+	err, ok := ctx.Value(steps.KeyCmdErr).(error)
+	if !ok || err == nil {
+		return fmt.Errorf("expected command to fail but it succeeded")
 	}
 	return nil
 }

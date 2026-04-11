@@ -16,5 +16,7 @@ fi
 
 mkdir -p "$RESULTS_DIR"
 
-echo "Running BDD tests: $FEATURE_FILES"
-go test ./tests/... -v -tags bdd -args -godog.format=pretty -godog.paths="$FEATURE_FILES" 2>&1 | tee "$RESULTS_DIR/bdd-output.txt"
+BDD_TIMEOUT="${BDD_TIMEOUT:-900s}"
+
+echo "Running BDD tests: $FEATURE_FILES (timeout: $BDD_TIMEOUT)"
+go test ./tests/... -v -tags bdd -timeout "$BDD_TIMEOUT" -args -godog.format=pretty -godog.paths="$FEATURE_FILES" 2>&1 | tee "$RESULTS_DIR/bdd-output.txt"

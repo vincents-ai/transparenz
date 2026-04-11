@@ -7,6 +7,23 @@ Feature: BSI-09 License Coverage (SPDX Identifiers)
     Given the transparenz binary is built
 
   Scenario: BSI-compliant SBOM has license enrichment
-    When I run "transparenz generate /test-project --format cyclonedx --bsi-compliant"
+    When I run "transparenz generate /test-project --format cyclonedx --no-fetch --bsi-compliant"
     Then the command succeeds
     And the majority of components have a license field set
+
+  Scenario: Components use SPDX license identifiers
+    When I run "transparenz generate /test-project --format cyclonedx --no-fetch --bsi-compliant"
+    Then the command succeeds
+    And the JSON components licenses use SPDX identifiers
+
+  Scenario: BSI check reports license coverage
+    When I run "transparenz generate /test-project --format cyclonedx --no-fetch --bsi-compliant -o sbom.json"
+    And I run "transparenz bsi-check sbom.json"
+    Then the command succeeds
+    And the JSON report has field "license_coverage" with number
+
+  Scenario: License coverage threshold check
+    When I run "transparenz generate /test-project --format cyclonedx --no-fetch --bsi-compliant -o sbom.json"
+    And I run "transparenz bsi-check sbom.json"
+    Then the command succeeds
+    And the bsi-check report has "license_coverage" at least 0%

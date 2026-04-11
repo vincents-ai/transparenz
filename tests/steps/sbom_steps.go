@@ -37,6 +37,9 @@ func RegisterSBOMSteps(s *godog.ScenarioContext) {
 	s.Step(`^the JSON components licenses use SPDX identifiers$`, theJSONComponentsLicensesUseSPDXIdentifiers)
 	s.Step(`^the JSON dependencies have items with "([^"]*)" field starting with "([^"]*)"$`, theJSONDependenciesHaveItemsWithFieldStartingWith)
 	s.Step(`^the primary component has at least one dependency$`, thePrimaryComponentHasAtLeastOneDependency)
+	s.Step(`^the JSON has field "([^"]*)" with non-empty string$`, theJSONHasFieldWithNonEmptyString)
+	s.Step(`^the JSON has field "([^"]*)" with object$`, theJSONHasFieldWithObject)
+	s.Step(`^the output is not HTML$`, theOutputIsNotHTML)
 }
 
 // ─── Step implementations ─────────────────────────────────────────────────────
@@ -508,4 +511,44 @@ func thePrimaryComponentHasAtLeastOneDependency(ctx context.Context) error {
 		}
 	}
 	return fmt.Errorf("no dependency has any dependencies")
+}
+
+func theJSONHasFieldWithNonEmptyString(ctx context.Context, field string) error {
+	m, ok := ctx.Value(KeyJSON).(map[string]interface{})
+	if !ok {
+		return fmt.Errorf("JSON is not an object")
+	}
+	val, exists := m[field]
+	if !exists || val == nil {
+		return fmt.Errorf("field %q not found", field)
+	}
+	str, ok := val.(string)
+	if !ok || str == "" {
+		return fmt.Errorf("field %q is not a non-empty string", field)
+	}
+	return nil
+}
+
+func theJSONHasFieldWithObject(ctx context.Context, field string) error {
+	m, ok := ctx.Value(KeyJSON).(map[string]interface{})
+	if !ok {
+		return fmt.Errorf("JSON is not an object")
+	}
+	val, exists := m[field]
+	if !exists || val == nil {
+		return fmt.Errorf("field %q not found", field)
+	}
+	if _, ok := val.(map[string]interface{}); !ok {
+		return fmt.Errorf("field %q is not an object, got %T", field, val)
+	}
+	return nil
+}
+
+func theOutputIsNotHTML(ctx context.Context) error {
+	out, _ := ctx.Value(KeyCmdOut).(string)
+	trimmed := strings.TrimSpace(out)
+	if strings.HasPrefix(trimmed, "<") && strings.Contains(trimmed, "<html") {
+		return fmt.Errorf("output is HTML")
+	}
+	return nil
 }
