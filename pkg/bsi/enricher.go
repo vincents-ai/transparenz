@@ -40,8 +40,29 @@ func init() {
 	}
 }
 
-// Enricher provides BSI TR-03183-2 compliance enrichment for SBOMs
-type Enricher struct {
+// BSIEnricher defines the interface for BSI TR-03183-2 compliance enrichment.
+type BSIEnricher interface {
+	// EnrichSBOM enriches an SBOM with hashes, licenses, and suppliers
+	EnrichSBOM(sbomJSON string) (string, error)
+
+	// InjectSuppliers adds supplier information to SBOM components/packages
+	InjectSuppliers(sbomJSON string) (string, error)
+
+	// EnrichSBOMModel enriches an SBOM model with licenses, hashes, and suppliers
+	EnrichSBOMModel(sbomModel *sbom.SBOM) (*sbom.SBOM, error)
+
+	// EnrichWithArtifactHashes adds SHA-512 hashes from compiled artifacts to an SBOM
+	EnrichWithArtifactHashes(sbomData map[string]interface{}, artifactDir string) error
+
+	// EnrichWithBinaryHash computes the SHA-512 of a single binary file and injects it
+	EnrichWithBinaryHash(sbomJSON string, binaryPath string) (string, error)
+
+	// InjectManufacturer injects the SBOM-producing organisation's identity
+	InjectManufacturer(sbomJSON string, name, url string) (string, error)
+}
+
+// enricher provides BSI TR-03183-2 compliance enrichment for SBOMs
+type enricher struct {
 	sourcePath string
 
 	// subModuleDirs is a lazily-populated map from Go module path → local
@@ -53,16 +74,17 @@ type Enricher struct {
 	subModuleDirs map[string]string // module-path → abs-dir
 }
 
-// NewEnricher creates a new BSI enricher
-func NewEnricher(sourcePath string) *Enricher {
-	return &Enricher{sourcePath: sourcePath}
+// NewEnricher creates a new BSI enricher.
+// Returns BSIEnricher interface.
+func NewEnricher(sourcePath string) BSIEnricher {
+	return &enricher{sourcePath: sourcePath}
 }
 
 // collectGoModDirs walks sourcePath and returns a map of Go module path →
 // directory.  Each directory that contains a go.mod file contributes one
 // entry.  Errors during the walk are silently ignored so that a partially-
 // accessible source tree degrades gracefully.
-func (e *Enricher) collectGoModDirs() map[string]string {
+func (e *enricher) collectGoModDirs() map[string]string {
 	result := make(map[string]string)
 	if e.sourcePath == "" {
 		return result
@@ -97,7 +119,7 @@ func (e *Enricher) collectGoModDirs() map[string]string {
 }
 
 // ensureSubModuleDirs lazily initialises subModuleDirs exactly once.
-func (e *Enricher) ensureSubModuleDirs() {
+func (e *enricher) ensureSubModuleDirs() {
 	e.subModuleOnce.Do(func() {
 		e.subModuleDirs = e.collectGoModDirs()
 	})
@@ -128,7 +150,7 @@ func readModuleName(goModPath string) string {
 // findSubModuleDir returns the local source directory for the sub-module
 // whose module path is the longest prefix match of packageName, or "" if
 // none matches.
-func (e *Enricher) findSubModuleDir(packageName string) string {
+func (e *enricher) findSubModuleDir(packageName string) string {
 	e.ensureSubModuleDirs()
 
 	bestLen := 0
@@ -145,7 +167,7 @@ func (e *Enricher) findSubModuleDir(packageName string) string {
 }
 
 // EnrichSBOM enriches an SBOM with hashes, licenses, and suppliers
-func (e *Enricher) EnrichSBOM(sbomJSON string) (string, error) {
+func (e *enricher) EnrichSBOM(sbomJSON string) (string, error) {
 	var sbomData map[string]interface{}
 	if err := json.Unmarshal([]byte(sbomJSON), &sbomData); err != nil {
 		return "", fmt.Errorf("failed to parse SBOM: %w", err)
@@ -185,7 +207,7 @@ func (e *Enricher) EnrichSBOM(sbomJSON string) (string, error) {
 //
 // For CycloneDX: sets component.supplier = {"name": "<supplier>"}.
 // For SPDX: sets package.supplier = "Organization: <supplier>".
-func (e *Enricher) InjectSuppliers(sbomJSON string) (string, error) {
+func (e *enricher) InjectSuppliers(sbomJSON string) (string, error) {
 	var sbomData map[string]interface{}
 	if err := json.Unmarshal([]byte(sbomJSON), &sbomData); err != nil {
 		return "", fmt.Errorf("InjectSuppliers: failed to parse SBOM: %w", err)
@@ -246,7 +268,7 @@ func (e *Enricher) InjectSuppliers(sbomJSON string) (string, error) {
 //
 // Supplier enrichment: extracted from the Go module path (first two path segments),
 // stored as a PURL qualifier since Syft's pkg.Package has no top-level Supplier field.
-func (e *Enricher) EnrichSBOMModel(sbomModel *sbom.SBOM) (*sbom.SBOM, error) {
+func (e *enricher) EnrichSBOMModel(sbomModel *sbom.SBOM) (*sbom.SBOM, error) {
 	if sbomModel == nil {
 		return nil, fmt.Errorf("sbomModel cannot be nil")
 	}
@@ -308,7 +330,7 @@ func (e *Enricher) EnrichSBOMModel(sbomModel *sbom.SBOM) (*sbom.SBOM, error) {
 // by "module version" (space-separated, matching Syft's internal format).
 // Values retain the full "h1:BASE64=" prefix so they can be stored directly in
 // GolangModuleEntry.H1Digest without re-encoding.
-func (e *Enricher) loadGoSumWithPrefix() map[string]string {
+func (e *enricher) loadGoSumWithPrefix() map[string]string {
 	hashes := make(map[string]string)
 
 	goSumPath := filepath.Join(e.sourcePath, "go.sum")
@@ -364,7 +386,7 @@ func extractSupplierFromModulePath(modulePath string) string {
 
 // enrichSPDX enriches SPDX format SBOMs
 // Adds BSI TR-03183-2 mandatory properties and asserts dependency completeness
-func (e *Enricher) enrichSPDX(sbomData map[string]interface{}) error {
+func (e *enricher) enrichSPDX(sbomData map[string]interface{}) error {
 	packages, ok := sbomData["packages"].([]interface{})
 	if !ok {
 		return fmt.Errorf("invalid SPDX format: missing packages")
@@ -423,7 +445,7 @@ func (e *Enricher) enrichSPDX(sbomData map[string]interface{}) error {
 // enrichCycloneDX enriches CycloneDX format SBOMs
 // Adds BSI TR-03183-2 mandatory properties: executable, archive, structured
 // and asserts dependency graph completeness
-func (e *Enricher) enrichCycloneDX(sbomData map[string]interface{}) error {
+func (e *enricher) enrichCycloneDX(sbomData map[string]interface{}) error {
 	components, ok := sbomData["components"].([]interface{})
 	if !ok {
 		return fmt.Errorf("invalid CycloneDX format: missing components")
@@ -499,7 +521,7 @@ func (e *Enricher) enrichCycloneDX(sbomData map[string]interface{}) error {
 //   - executable: whether the component contains executable code
 //   - archive: whether the component is a compressed archive
 //   - structured: whether the component has structured/computed metadata
-func (e *Enricher) buildBSIProperties(comp map[string]interface{}) []interface{} {
+func (e *enricher) buildBSIProperties(comp map[string]interface{}) []interface{} {
 	compType := getString(comp, "type")
 
 	// Determine component classification
@@ -554,7 +576,7 @@ func (e *Enricher) buildBSIProperties(comp map[string]interface{}) []interface{}
 
 // buildBSIAnnotations creates BSI TR-03183-2 mandatory annotations for SPDX packages.
 // SPDX uses annotations (not properties) for extensible metadata.
-func (e *Enricher) buildBSIAnnotations(pkg map[string]interface{}) []interface{} {
+func (e *enricher) buildBSIAnnotations(pkg map[string]interface{}) []interface{} {
 	annotations := []interface{}{}
 
 	// Capture a single consistent timestamp for all annotations in this enrichment run
@@ -583,7 +605,7 @@ func (e *Enricher) buildBSIAnnotations(pkg map[string]interface{}) []interface{}
 // assertDependencyCompleteness adds dependency graph completeness declaration to the SBOM.
 // BSI TR-03183-2 Section 4.2 requires explicit declaration of whether all dependencies
 // have been identified. This sets the completeness assertion based on analysis scope.
-func (e *Enricher) assertDependencyCompleteness(sbomData map[string]interface{}) {
+func (e *enricher) assertDependencyCompleteness(sbomData map[string]interface{}) {
 	// Check if this is CycloneDX format
 	if _, ok := sbomData["bomFormat"].(string); ok {
 		// CycloneDX: add completeness to metadata properties
@@ -663,7 +685,7 @@ func (e *Enricher) assertDependencyCompleteness(sbomData map[string]interface{})
 //   - These hashes provide module integrity verification
 //   - They do NOT satisfy artifact provenance requirements
 //   - Production systems must implement separate binary hash tracking
-func (e *Enricher) loadGoSum() map[string]string {
+func (e *enricher) loadGoSum() map[string]string {
 	hashes := make(map[string]string)
 
 	goSumPath := filepath.Join(e.sourcePath, "go.sum")
@@ -697,7 +719,7 @@ func (e *Enricher) loadGoSum() map[string]string {
 }
 
 // detectLicense attempts to detect license from well-known patterns
-func (e *Enricher) detectLicense(packageName string) string {
+func (e *enricher) detectLicense(packageName string) string {
 	// Check known licenses database (100+ popular packages)
 	if license := e.getKnownLicense(packageName); license != "" {
 		return license
@@ -712,7 +734,7 @@ func (e *Enricher) detectLicense(packageName string) string {
 }
 
 // getKnownLicense returns license for well-known Go packages (performance cache)
-func (e *Enricher) getKnownLicense(packageName string) string {
+func (e *enricher) getKnownLicense(packageName string) string {
 	// Keep only ~20 most common packages for quick lookup performance cache
 	// Other licenses will be detected by the classifier
 	knownLicenses := map[string]string{
@@ -763,7 +785,7 @@ func (e *Enricher) getKnownLicense(packageName string) string {
 
 // parseLicenseFile attempts to parse LICENSE file from Go module cache or
 // from a local sub-module directory discovered by walking the source tree.
-func (e *Enricher) parseLicenseFile(packageName string) string {
+func (e *enricher) parseLicenseFile(packageName string) string {
 	// Common license file names - include NOTICE
 	licenseFiles := []string{
 		"LICENSE",
@@ -848,7 +870,7 @@ func detectLicenseFromText(text string) string {
 }
 
 // detectSupplier attempts to detect supplier from package name
-func (e *Enricher) detectSupplier(packageName string) string {
+func (e *enricher) detectSupplier(packageName string) string {
 	// Known organizations and their canonical names
 	knownOrgs := map[string]string{
 		// Major tech companies
@@ -1048,7 +1070,7 @@ func parseAuthorsFile(file *os.File) string {
 // directories, then reads the final segment's parent directory looking for
 // entries of the form "<repo>@<version>" (or "<repo>@v<version>" with Go's
 // case-encoded upper-case escaping). It returns the first match found.
-func (e *Enricher) getModulePath(packageName string) string {
+func (e *enricher) getModulePath(packageName string) string {
 	gopath := os.Getenv("GOPATH")
 	if gopath == "" {
 		homeDir, err := os.UserHomeDir()
@@ -1175,7 +1197,7 @@ func CalculateArtifactHash(artifactPath string) (string, error) {
 // BSI TR-03183-2 compliance: Only artifact-level hashes (from compiled binaries)
 // satisfy cryptographic integrity requirements. Module-level hashes from go.sum
 // do NOT satisfy these requirements (false provenance).
-func (e *Enricher) EnrichWithArtifactHashes(sbomData map[string]interface{}, artifactDir string) error {
+func (e *enricher) EnrichWithArtifactHashes(sbomData map[string]interface{}, artifactDir string) error {
 	components, ok := sbomData["components"].([]interface{})
 	if !ok {
 		// Try SPDX format
@@ -1189,7 +1211,7 @@ func (e *Enricher) EnrichWithArtifactHashes(sbomData map[string]interface{}, art
 	return e.enrichCycloneDXWithArtifactHashes(components, artifactDir)
 }
 
-func (e *Enricher) enrichCycloneDXWithArtifactHashes(components []interface{}, artifactDir string) error {
+func (e *enricher) enrichCycloneDXWithArtifactHashes(components []interface{}, artifactDir string) error {
 	entries, err := os.ReadDir(artifactDir)
 	if err != nil {
 		return fmt.Errorf("failed to read artifact directory %s: %w", artifactDir, err)
@@ -1236,7 +1258,7 @@ func (e *Enricher) enrichCycloneDXWithArtifactHashes(components []interface{}, a
 	return nil
 }
 
-func (e *Enricher) enrichSPDXWithArtifactHashes(packages []interface{}, artifactDir string) error {
+func (e *enricher) enrichSPDXWithArtifactHashes(packages []interface{}, artifactDir string) error {
 	entries, err := os.ReadDir(artifactDir)
 	if err != nil {
 		return fmt.Errorf("failed to read artifact directory %s: %w", artifactDir, err)
@@ -1293,7 +1315,7 @@ func (e *Enricher) enrichSPDXWithArtifactHashes(packages []interface{}, artifact
 // used.  The checksum is written in SPDX format:
 //
 //	{"algorithm": "SHA512", "checksumValue": "<hex>"}
-func (e *Enricher) EnrichWithBinaryHash(sbomJSON string, binaryPath string) (string, error) {
+func (e *enricher) EnrichWithBinaryHash(sbomJSON string, binaryPath string) (string, error) {
 	hash, err := calculateFileHash(binaryPath)
 	if err != nil {
 		return "", fmt.Errorf("EnrichWithBinaryHash: failed to hash %s: %w", binaryPath, err)
@@ -1322,7 +1344,7 @@ func (e *Enricher) EnrichWithBinaryHash(sbomJSON string, binaryPath string) (str
 // injectBinaryHashCycloneDX injects the SHA-512 into metadata.component.externalReferences.
 // If metadata or metadata.component does not exist, it is created.
 // An existing distribution entry with SHA-512 is replaced.
-func (e *Enricher) injectBinaryHashCycloneDX(sbomData map[string]interface{}, hash string) {
+func (e *enricher) injectBinaryHashCycloneDX(sbomData map[string]interface{}, hash string) {
 	metadata, ok := sbomData["metadata"].(map[string]interface{})
 	if !ok {
 		metadata = map[string]interface{}{}
@@ -1359,7 +1381,7 @@ func (e *Enricher) injectBinaryHashCycloneDX(sbomData map[string]interface{}, ha
 
 // injectBinaryHashSPDX appends a SHA-512 checksum to the best-matching SPDX package.
 // It prefers the package whose name equals binaryName; falls back to the first package.
-func (e *Enricher) injectBinaryHashSPDX(sbomData map[string]interface{}, binaryName, hash string) {
+func (e *enricher) injectBinaryHashSPDX(sbomData map[string]interface{}, binaryName, hash string) {
 	packages, ok := sbomData["packages"].([]interface{})
 	if !ok || len(packages) == 0 {
 		return
@@ -1423,7 +1445,7 @@ func (e *Enricher) injectBinaryHashSPDX(sbomData map[string]interface{}, binaryN
 //	}
 //
 // When name is empty the function returns the input SBOM unchanged (silent skip).
-func (e *Enricher) InjectManufacturer(sbomJSON string, name, url string) (string, error) {
+func (e *enricher) InjectManufacturer(sbomJSON string, name, url string) (string, error) {
 	// Silent skip when no name is provided.
 	if name == "" {
 		return sbomJSON, nil
@@ -1449,7 +1471,7 @@ func (e *Enricher) InjectManufacturer(sbomJSON string, name, url string) (string
 }
 
 // injectManufacturerCycloneDX sets metadata.manufacturer in a CycloneDX SBOM map.
-func (e *Enricher) injectManufacturerCycloneDX(sbomData map[string]interface{}, name, url string) {
+func (e *enricher) injectManufacturerCycloneDX(sbomData map[string]interface{}, name, url string) {
 	metadata, ok := sbomData["metadata"].(map[string]interface{})
 	if !ok {
 		metadata = map[string]interface{}{}
@@ -1466,7 +1488,7 @@ func (e *Enricher) injectManufacturerCycloneDX(sbomData map[string]interface{}, 
 }
 
 // injectManufacturerSPDX appends a document-level REVIEW annotation to an SPDX SBOM map.
-func (e *Enricher) injectManufacturerSPDX(sbomData map[string]interface{}, name, url string) {
+func (e *enricher) injectManufacturerSPDX(sbomData map[string]interface{}, name, url string) {
 	annotations, ok := sbomData["annotations"].([]interface{})
 	if !ok {
 		annotations = []interface{}{}
