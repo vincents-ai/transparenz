@@ -5,7 +5,7 @@ package bsi
 
 import (
 	"encoding/json"
-	"time"
+	"fmt"
 )
 
 // ValidationResult contains the result of BSI TR-03183-2 validation
@@ -65,7 +65,7 @@ func (v *validator) validateCycloneDX(sbomData map[string]interface{}, result *V
 		result.Valid = false
 		result.Findings = append(result.Findings, ValidationFinding{
 			Issue:    "Missing components in CycloneDX SBOM",
-			Severity: "high",
+			Severity:  "high",
 		})
 		return
 	}
@@ -197,66 +197,4 @@ func (v *validator) checkDependencyCompleteness(sbomData map[string]interface{},
 // contains checks if a string contains a substring
 func contains(s, substr string) bool {
 	return len(s) >= len(substr) && (s == substr || len(s) > 0 && (s[0:len(substr)] == substr || contains(s[1:], substr)))
-}
-
-// assertDependencyCompleteness adds dependency graph completeness declaration to the SBOM.
-// This is kept in enricher.go for backward compatibility but delegates to validator.
-func (e *enricher) assertDependencyCompleteness(sbomData map[string]interface{}) {
-	// This method is now a wrapper for backward compatibility
-	// The actual validation logic is in the validator
-	if _, ok := sbomData["bomFormat"].(string); ok {
-		// CycloneDX
-		metadata, ok := sbomData["metadata"].(map[string]interface{})
-		if !ok {
-			metadata = map[string]interface{}{}
-			sbomData["metadata"] = metadata
-		}
-
-		properties, ok := metadata["properties"].([]interface{})
-		if !ok {
-			properties = []interface{}{}
-		}
-
-		hasCompleteness := false
-		for _, prop := range properties {
-			if propMap, ok := prop.(map[string]interface{}); ok {
-				if name, ok := propMap["name"].(string); ok && name == "completeness" {
-					hasCompleteness = true
-					break
-				}
-			}
-		}
-
-		if !hasCompleteness {
-			properties = append(properties,
-				map[string]interface{}{
-					"name":  "completeness",
-					"value": "complete",
-				},
-				map[string]interface{}{
-					"name":  "completeness:scope",
-					"value": "transitive",
-				},
-			)
-			metadata["properties"] = properties
-		}
-
-		sbomData["specVersion"] = "1.6"
-	} else {
-		// SPDX
-		annotations, ok := sbomData["annotations"].([]interface{})
-		if !ok {
-			annotations = []interface{}{}
-		}
-
-		annotations = append(annotations,
-			map[string]interface{}{
-				"annotator":      "Tool: transparenz-bsi-enricher",
-				"annotationDate": time.Now().UTC().Format(time.RFC3339),
-				"annotationType": "OTHER",
-				"comment":        "BSI TR-03183-2: dependencyCompleteness=complete, scope=transitive",
-			},
-		)
-		sbomData["annotations"] = annotations
-	}
 }
