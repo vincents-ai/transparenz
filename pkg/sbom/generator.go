@@ -31,14 +31,33 @@ func IsValidScope(s string) bool {
 	return false
 }
 
-// Generator wraps native Syft library for SBOM generation
-type Generator struct {
+// SBOMGenerator defines the interface for SBOM generation.
+type SBOMGenerator interface {
+	// Generate creates an SBOM from a source path using native Syft library.
+	// sourcePath can be a directory, file, or container image reference.
+	// format can be: "spdx" or "cyclonedx".
+	Generate(ctx context.Context, sourcePath string, format string) (string, error)
+
+	// GenerateWithScope creates an SBOM and injects the transparenz:scope property.
+	// scope must be one of ValidScopes ("source" or "binary").
+	GenerateWithScope(ctx context.Context, sourcePath, format, scope string) (string, error)
+
+	// FormatSBOM converts SBOM model to specified format.
+	FormatSBOM(sbomModel *sbom.SBOM, format string) ([]byte, error)
+
+	// GetSBOMModel generates the raw SBOM model for further processing.
+	GetSBOMModel(ctx context.Context, sourcePath string) (*sbom.SBOM, *source.Description, error)
+}
+
+// generator wraps native Syft library for SBOM generation
+type generator struct {
 	verbose bool
 }
 
-// NewGenerator creates a new SBOM generator
-func NewGenerator(verbose bool) *Generator {
-	return &Generator{
+// NewGenerator creates a new SBOM generator.
+// Returns SBOMGenerator interface.
+func NewGenerator(verbose bool) SBOMGenerator {
+	return &generator{
 		verbose: verbose,
 	}
 }
@@ -57,13 +76,14 @@ func buildSBOMConfig() *syft.CreateSBOMConfig {
 }
 
 // Generate creates an SBOM from a source path using native Syft library.
+// This is the implementation for the SBOMGenerator interface.
 // sourcePath can be:
 //   - Directory path (e.g., ".")
 //   - File path
 //   - Container image reference (e.g., "docker:nginx:latest")
 //
 // format can be: "spdx" or "cyclonedx"
-func (g *Generator) Generate(ctx context.Context, sourcePath string, format string) (string, error) {
+func (g *generator) Generate(ctx context.Context, sourcePath string, format string) (string, error) {
 	src, err := syft.GetSource(ctx, sourcePath, nil)
 	if err != nil {
 		return "", fmt.Errorf("failed to detect source: %w", err)
@@ -112,7 +132,7 @@ func (g *Generator) Generate(ctx context.Context, sourcePath string, format stri
 // transparenz:scope property/comment into the output document.  scope must be
 // one of ValidScopes ("source" or "binary").  An empty scope is treated the
 // same as "source".
-func (g *Generator) GenerateWithScope(ctx context.Context, sourcePath, format, scope string) (string, error) {
+func (g *generator) GenerateWithScope(ctx context.Context, sourcePath, format, scope string) (string, error) {
 	output, err := g.Generate(ctx, sourcePath, format)
 	if err != nil {
 		return "", err
@@ -210,7 +230,7 @@ func injectScopeSPDX(doc map[string]interface{}, scope string) {
 
 // FormatSBOM converts SBOM model to specified format.
 // This is exported to allow formatting of enriched SBOM models.
-func (g *Generator) FormatSBOM(sbomModel *sbom.SBOM, format string) ([]byte, error) {
+func (g *generator) FormatSBOM(sbomModel *sbom.SBOM, format string) ([]byte, error) {
 	var buf bytes.Buffer
 
 	switch format {
@@ -240,13 +260,13 @@ func (g *Generator) FormatSBOM(sbomModel *sbom.SBOM, format string) ([]byte, err
 }
 
 // formatSBOM is the internal version that calls FormatSBOM
-func (g *Generator) formatSBOM(sbomModel *sbom.SBOM, format string) ([]byte, error) {
+func (g *generator) formatSBOM(sbomModel *sbom.SBOM, format string) ([]byte, error) {
 	return g.FormatSBOM(sbomModel, format)
 }
 
 // GetSBOMModel generates the raw SBOM model for further processing.
 // This is useful for BSI enrichment that needs access to internal structures.
-func (g *Generator) GetSBOMModel(ctx context.Context, sourcePath string) (*sbom.SBOM, *source.Description, error) {
+func (g *generator) GetSBOMModel(ctx context.Context, sourcePath string) (*sbom.SBOM, *source.Description, error) {
 	src, err := syft.GetSource(ctx, sourcePath, nil)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to detect source: %w", err)
