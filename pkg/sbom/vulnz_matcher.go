@@ -45,17 +45,26 @@ func (idx *MatchIndex) Lookup(name, version string) []matchEntry {
 	return idx.entries[name]
 }
 
-type VulnzMatcher struct {
+// VulnerabilityMatcher defines the interface for matching SBOM components to vulnerabilities.
+type VulnerabilityMatcher interface {
+	// MatchComponents matches a list of SBOM components against vulnerability data.
+	MatchComponents(components []SBOMComponent) []VulnerabilityMatch
+}
+
+// vulnzMatcher matches SBOM components to vulnerability data
+type vulnzMatcher struct {
 	matchIdx *MatchIndex
 }
 
-func NewVulnzMatcher() *VulnzMatcher {
-	return &VulnzMatcher{
+// NewVulnzMatcher creates a new vulnerability matcher.
+// Returns VulnerabilityMatcher interface.
+func NewVulnzMatcher() VulnerabilityMatcher {
+	return &vulnzMatcher{
 		matchIdx: NewMatchIndex(),
 	}
 }
 
-func (m *VulnzMatcher) MatchComponents(components []SBOMComponent) []VulnerabilityMatch {
+func (m *vulnzMatcher) MatchComponents(components []SBOMComponent) []VulnerabilityMatch {
 	var matches []VulnerabilityMatch
 	seen := make(map[string]bool)
 
