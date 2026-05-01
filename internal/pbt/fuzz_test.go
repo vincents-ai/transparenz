@@ -6,8 +6,8 @@ package pbt_test
 import (
 	"testing"
 
-	"github.com/shift/transparenz/cmd"
-	"github.com/shift/transparenz/pkg/sbom"
+	"github.com/vincents-ai/transparenz/cmd"
+	"github.com/vincents-ai/transparenz/pkg/sbom"
 )
 
 func FuzzParseSBOM(f *testing.F) {

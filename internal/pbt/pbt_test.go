@@ -19,7 +19,7 @@ import (
 	"gorm.io/gorm/logger"
 	"pgregory.net/rapid"
 
-	"github.com/shift/transparenz/cmd"
+	"github.com/vincents-ai/transparenz/cmd"
 )
 
 // ─── Suite 1: BSI score always in [0.0, 1.0] ────────────────────────────────

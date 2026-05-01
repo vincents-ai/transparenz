@@ -1,0 +1,52 @@
+<svg width="512" height="512" viewBox="0 0 512 512" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <!-- 
+    transparenz CLI Logo (vincents.ai family)
+    - Palette: Amber/Gold/Apricot (Validation & Generation)
+    - Outer Ring: 6 segments weighted by bsi-check categories (SHA, License, Supplier, etc.)
+    - Central Motif: Validation Checkmark / Score Nexus
+  -->
+
+  <!-- Outer Ring: The 6 BSI-Check Categories (r=210) -->
+  <g id="bsi-categories-weighted" stroke-width="22" stroke-linecap="round">
+    <!-- 1. SHA-512 coverage (30% weight) -->
+    <path d="M256 46 A 210 210 0 0 1 444 160" stroke="#f59e0b" />
+    <!-- 2. License coverage (25% weight) -->
+    <path d="M464 220 A 210 210 0 0 1 380 420" stroke="#d97706" />
+    <!-- 3. Supplier coverage (15% weight) -->
+    <path d="M330 448 A 210 210 0 0 1 210 462" stroke="#f59e0b" />
+    <!-- 4. Component properties (15% weight) -->
+    <path d="M160 448 A 210 210 0 0 1 55 330" stroke="#fb923c" stroke-opacity="0.8" />
+    <!-- 5. Dependency completeness (10% weight) -->
+    <path d="M46 256 A 210 210 0 0 1 90 140" stroke="#d97706" />
+    <!-- 6. Format version (5% weight) -->
+    <path d="M125 90 A 210 210 0 0 1 210 54" stroke="#f59e0b" stroke-opacity="0.6" />
+  </g>
+
+  <!-- Middle Ring: Submission & Enrichment Spans (r=145) -->
+  <g id="cli-operations" stroke-width="14" stroke-linecap="round">
+    <circle cx="256" cy="256" r="145" stroke="#f59e0b" stroke-opacity="0.1" />
+    <!-- Generation/Enrichment Paths -->
+    <path d="M256 111 A 145 145 0 0 1 401 256" stroke="#d97706" stroke-dasharray="60 20" />
+    <!-- Submission Directional Path -->
+    <path d="M111 256 A 145 145 0 0 1 256 111" stroke="#fb923c" stroke-dasharray="10 10 40 10" />
+    <path d="M256 401 A 145 145 0 0 1 111 256" stroke="#f59e0b" stroke-dasharray="80 30" />
+  </g>
+
+  <!-- Inner Core: The Validation Nexus (r=85) -->
+  <g id="validation-core">
+    <!-- Restored Concentric Base -->
+    <circle cx="256" cy="256" r="85" stroke="#f59e0b" stroke-width="18" stroke-dasharray="15 20" stroke-linecap="round" />
+    
+    <!-- Integrated Checkmark (Validation Success) -->
+    <path d="M210 256 L 240 286 L 310 216" stroke="#d97706" stroke-width="12" stroke-linecap="round" stroke-linejoin="round" />
+    
+    <!-- Core Status Point -->
+    <circle cx="256" cy="256" r="12" fill="#fb923c" fill-opacity="0.3" />
+  </g>
+
+  <!-- Cardinal Status Nodes -->
+  <circle cx="256" cy="46" r="6" fill="#fb923c" /> <!-- CLI Binary -->
+  <circle cx="466" cy="256" r="6" fill="#f59e0b" /> <!-- Server Submission -->
+  <circle cx="256" cy="466" r="6" fill="#d97706" /> <!-- Database Persistence -->
+  <circle cx="46" cy="256" r="6" fill="#f59e0b" />  <!-- BSI Compliance -->
+</svg>

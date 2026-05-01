@@ -6,8 +6,8 @@ package transparenz
 import (
 	"context"
 
-	"github.com/shift/transparenz/pkg/bsi"
-	"github.com/shift/transparenz/pkg/sbom"
+	"github.com/vincents-ai/transparenz/pkg/bsi"
+	"github.com/vincents-ai/transparenz/pkg/sbom"
 )
 
 // Container holds all dependencies for the transparenz application.

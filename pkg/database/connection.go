@@ -8,7 +8,7 @@ import (
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
 
-	"github.com/shift/transparenz/internal/models"
+	"github.com/vincents-ai/transparenz/internal/models"
 )
 
 // Connect establishes a connection to the PostgreSQL database using GORM

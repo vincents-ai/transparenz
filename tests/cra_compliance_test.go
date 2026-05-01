@@ -17,7 +17,7 @@ import (
 
 	"github.com/cucumber/godog"
 
-	"github.com/shift/transparenz/tests/steps"
+	"github.com/vincents-ai/transparenz/tests/steps"
 )
 
 var prebuiltBinary string

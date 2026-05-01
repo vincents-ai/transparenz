@@ -9,11 +9,11 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/shift/transparenz/internal/repository"
-	"github.com/shift/transparenz/pkg/bsi"
-	"github.com/shift/transparenz/pkg/database"
-	"github.com/shift/transparenz/pkg/depfetch"
-	"github.com/shift/transparenz/pkg/sbom"
+	"github.com/vincents-ai/transparenz/internal/repository"
+	"github.com/vincents-ai/transparenz/pkg/bsi"
+	"github.com/vincents-ai/transparenz/pkg/database"
+	"github.com/vincents-ai/transparenz/pkg/depfetch"
+	"github.com/vincents-ai/transparenz/pkg/sbom"
 )
 
 var (

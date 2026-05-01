@@ -13,9 +13,9 @@ import (
 	"github.com/google/uuid"
 	"github.com/spf13/cobra"
 
-	"github.com/shift/transparenz/internal/models"
-	"github.com/shift/transparenz/internal/repository"
-	"github.com/shift/transparenz/pkg/database"
+	"github.com/vincents-ai/transparenz/internal/models"
+	"github.com/vincents-ai/transparenz/internal/repository"
+	"github.com/vincents-ai/transparenz/pkg/database"
 )
 
 var dbCmd = &cobra.Command{

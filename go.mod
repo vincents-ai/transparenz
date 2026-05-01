@@ -1,4 +1,4 @@
-module github.com/shift/transparenz
+module github.com/vincents-ai/transparenz
 
 go 1.25.8
 

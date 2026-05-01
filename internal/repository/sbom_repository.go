@@ -15,7 +15,7 @@ import (
 	"github.com/google/uuid"
 	"gorm.io/gorm"
 
-	"github.com/shift/transparenz/internal/models"
+	"github.com/vincents-ai/transparenz/internal/models"
 )
 
 // SBOMRepository handles database operations for SBOMs

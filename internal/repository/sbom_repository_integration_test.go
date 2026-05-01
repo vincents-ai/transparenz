@@ -12,7 +12,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/shift/transparenz/internal/testutil"
+	"github.com/vincents-ai/transparenz/internal/testutil"
 )
 
 // helpers ─────────────────────────────────────────────────────────────────────

@@ -21,10 +21,10 @@ A CLI tool for generating, enriching, validating, and submitting BSI TR-03183-2 
 
 ```bash
 # Install via go install
-go install github.com/shift/transparenz@latest
+go install github.com/vincents-ai/transparenz@latest
 
 # Or build from source
-git clone https://github.com/shift/transparenz.git
+git clone https://github.com/vincents-ai/transparenz.git
 cd transparenz
 go build -o transparenz .
 ```

@@ -3,7 +3,7 @@ package main
 import (
 	_ "modernc.org/sqlite"
 
-	"github.com/shift/transparenz/cmd"
+	"github.com/vincents-ai/transparenz/cmd"
 )
 
 func main() {
