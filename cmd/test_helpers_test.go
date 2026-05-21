@@ -8,7 +8,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-const testdata = "./testdata"
+const testdata = "./cmd/testdata"
 
 func getTestDir(t *testing.T) string {
 	cwd, err := os.Getwd()
