@@ -52,6 +52,23 @@ func TestCLI_Generate(t *testing.T) {
 			require.NoError(t, err, "command should succeed, output: %s", truncate(string(output), 200))
 			require.NotEmpty(t, output, "output should not be empty")
 
+			if tt.wantFile {
+				outFile := filepath.Join(testDir, "cmd/testdata/sbom_output.json")
+				fileData, err := os.ReadFile(outFile)
+				require.NoError(t, err, "output file should exist and be readable")
+				os.Remove(outFile)
+
+				fileStr := strings.ToLower(string(fileData))
+				if tt.wantFormat == "spdx" {
+					require.True(t, strings.Contains(fileStr, "spdx"),
+						"file should contain SPDX, got: %s", truncate(fileStr, 200))
+				} else if tt.wantFormat == "cyclonedx" {
+					require.True(t, strings.Contains(fileStr, "bomformat") || strings.Contains(fileStr, "cyclonedx"),
+						"file should contain CycloneDX format")
+				}
+				return
+			}
+
 			outStr := strings.ToLower(string(output))
 
 			if tt.wantFormat == "spdx" {
@@ -60,12 +77,6 @@ func TestCLI_Generate(t *testing.T) {
 			} else if tt.wantFormat == "cyclonedx" {
 				require.True(t, strings.Contains(outStr, "bomformat") || strings.Contains(outStr, "cyclonedx"),
 					"output should contain CycloneDX format")
-			}
-
-			if tt.wantFile {
-				_, err := os.Stat(filepath.Join(testDir, "cmd/testdata/sbom_output.json"))
-				require.NoError(t, err, "output file should exist")
-				os.Remove(filepath.Join(testDir, "cmd/testdata/sbom_output.json"))
 			}
 		})
 	}
