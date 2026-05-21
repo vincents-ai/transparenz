@@ -111,7 +111,7 @@ func TestCLI_Generate_ScopeOutputFile(t *testing.T) {
 	cliBin := getCLIBinary(t)
 	testDir := getTestDir(t)
 
-	outFile := filepath.Join(testDir, "testdata", "sbom_scope_test.json")
+	outFile := filepath.Join(testDir, "cmd", "testdata", "sbom_scope_test.json")
 	defer os.Remove(outFile)
 
 	args := []string{"generate", testdata, "-f", "cyclonedx", "--scope", "source", "-o", outFile}

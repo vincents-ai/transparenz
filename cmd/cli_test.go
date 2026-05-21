@@ -35,7 +35,7 @@ func TestCLI_Generate(t *testing.T) {
 		},
 		{
 			name:       "generate with output file",
-			args:       []string{"generate", testdata, "-o", "testdata/sbom_output.json"},
+			args:       []string{"generate", testdata, "-o", "cmd/testdata/sbom_output.json"},
 			wantFormat: "spdx",
 			wantFile:   true,
 		},
@@ -63,9 +63,9 @@ func TestCLI_Generate(t *testing.T) {
 			}
 
 			if tt.wantFile {
-				_, err := os.Stat(filepath.Join(testDir, "testdata/sbom_output.json"))
+				_, err := os.Stat(filepath.Join(testDir, "cmd/testdata/sbom_output.json"))
 				require.NoError(t, err, "output file should exist")
-				os.Remove(filepath.Join(testDir, "testdata/sbom_output.json"))
+				os.Remove(filepath.Join(testDir, "cmd/testdata/sbom_output.json"))
 			}
 		})
 	}
