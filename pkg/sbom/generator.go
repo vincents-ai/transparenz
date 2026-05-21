@@ -217,11 +217,12 @@ func injectScopeCycloneDX(doc map[string]interface{}, scope string) {
 func injectScopeSPDX(doc map[string]interface{}, scope string) {
 	annotation := fmt.Sprintf("transparenz:scope=%s", scope)
 	existing, _ := doc["documentComment"].(string)
-	if existing == "" {
+	switch {
+	case existing == "":
 		doc["documentComment"] = annotation
-	} else if !strings.Contains(existing, "transparenz:scope=") {
+	case !strings.Contains(existing, "transparenz:scope="):
 		doc["documentComment"] = annotation + "\n" + existing
-	} else {
+	default:
 		// Replace existing annotation
 		lines := strings.Split(existing, "\n")
 		for i, l := range lines {

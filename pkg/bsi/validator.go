@@ -65,7 +65,7 @@ func (v *validator) validateCycloneDX(sbomData map[string]interface{}, result *V
 		result.Valid = false
 		result.Findings = append(result.Findings, ValidationFinding{
 			Issue:    "Missing components in CycloneDX SBOM",
-			Severity:  "high",
+			Severity: "high",
 		})
 		return
 	}

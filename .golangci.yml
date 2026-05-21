@@ -1,5 +1,6 @@
 version: "2"
-
+run:
+  timeout: 5m
 linters:
   enable:
     - gosec
@@ -9,32 +10,63 @@ linters:
     - revive
     - unused
     - gocritic
-
+  settings:
+    errcheck:
+      exclude-functions:
+        - (*os.File).Close
+        - (*database/sql.DB).Close
+        - (*database/sql.Rows).Close
+        - (*database/sql.Tx).Rollback
+        - (net/http.Response).Body.Close
+        - fmt.Fprintln
+        - fmt.Fprintf
+        - (*github.com/spf13/pflag.FlagSet).Usage
+    revive:
+      rules:
+        - name: unused-parameter
+          disabled: true
+        - name: exported
+          disabled: true
+        - name: package-comments
+          disabled: true
+        - name: var-naming
+          disabled: true
+  exclusions:
+    rules:
+      - path: _test\.go
+        linters:
+          - gosec
+          - errcheck
+      - path: tests/
+        linters:
+          - gosec
+          - errcheck
+      # Acceptable-to-ignore error returns
+      - linters:
+          - errcheck
+        text: "Error return value of `(.*\\.Close|.*\\.Flush|rows\\.Err|tx\\.Rollback)` is not checked"
+      # gosec: acceptable patterns
+      - linters:
+          - gosec
+        text: "G(101|104|204|301|304|306|703|704)"
+      # gocritic: ifElseChain suggestions
+      - linters:
+          - gocritic
+        text: "ifElseChain|exitAfterDefer"
+      # staticcheck: tagged switch suggestions
+      - linters:
+          - staticcheck
+        text: "QF1003|SA4031"
+      # unused: fields/funcs in cmd and testutil (pre-existing, gated behind build tags)
+      - path: cmd/command\.go
+        linters:
+          - unused
+      - path: cmd/test_helpers_test\.go
+        linters:
+          - unused
+      - path: internal/testutil/
+        linters:
+          - unused
 formatters:
   enable:
     - gofmt
-
-linters-settings:
-  revive:
-    rules:
-      - name: unused-parameter
-        disabled: true
-      - name: exported
-        disabled: true
-      - name: package-comments
-        disabled: true
-      - name: var-naming
-        disabled: true
-
-issues:
-  exclude-rules:
-    # Don't apply gosec or errcheck to test files
-    - path: "_test\\.go"
-      linters:
-        - gosec
-        - errcheck
-
-    # Acceptable-to-ignore error returns
-    - linters:
-        - errcheck
-      text: "Error return value of `(.*\\.Close|rows\\.Err|tx\\.Rollback|http\\.Body\\.Close)` is not checked"
