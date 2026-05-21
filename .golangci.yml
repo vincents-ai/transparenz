@@ -9,6 +9,9 @@ linters:
     - revive
     - unused
     - gocritic
+
+formatters:
+  enable:
     - gofmt
 
 linters-settings:

@@ -1,0 +1,125 @@
+{
+  "descriptor": {
+    "name": "grype",
+    "version": "0.80.0"
+  },
+  "distro": {
+    "name": "alpine",
+    "version": "3.19",
+    "idLike": ["alpine"]
+  },
+  "source": {
+    "type": "directory",
+    "target": "."
+  },
+  "matches": [
+    {
+      "vulnerability": {
+        "id": "CVE-2024-0001",
+        "dataSource": "https://nvd.nist.gov/vuln/data-feeds",
+        "namespace": "nvd:cpe",
+        "severity": "Critical",
+        "urls": ["https://nvd.nist.gov/vuln/detail/CVE-2024-0001"],
+        "description": "A critical test vulnerability",
+        "fix": {
+          "versions": ["2.0.0"],
+          "state": "fixed"
+        }
+      },
+      "artifact": {
+        "name": "test-package",
+        "version": "1.0.0",
+        "type": "apk",
+        "purl": "pkg:alpine/test-package@1.0.0",
+        "language": ""
+      },
+      "matchDetails": [
+        {
+          "type": "exact-direct-match",
+          "matcher": "apk-matcher",
+          "searchedBy": {"distro": {"type": "alpine", "version": "3.19"}},
+          "found": {"versionConstraint": "< 2.0.0"}
+        }
+      ]
+    },
+    {
+      "vulnerability": {
+        "id": "CVE-2024-0002",
+        "dataSource": "https://nvd.nist.gov/vuln/data-feeds",
+        "namespace": "nvd:cpe",
+        "severity": "High",
+        "urls": ["https://nvd.nist.gov/vuln/detail/CVE-2024-0002"],
+        "description": "A high test vulnerability with no fix"
+      },
+      "artifact": {
+        "name": "unfixed-package",
+        "version": "3.1.4",
+        "type": "apk",
+        "purl": "pkg:alpine/unfixed-package@3.1.4",
+        "language": ""
+      },
+      "matchDetails": [
+        {
+          "type": "exact-direct-match",
+          "matcher": "apk-matcher",
+          "searchedBy": {"distro": {"type": "alpine", "version": "3.19"}},
+          "found": {"versionConstraint": "< 99.99.99"}
+        }
+      ]
+    },
+    {
+      "vulnerability": {
+        "id": "CVE-2024-0003",
+        "dataSource": "https://nvd.nist.gov/vuln/data-feeds",
+        "namespace": "nvd:cpe",
+        "severity": "Medium",
+        "urls": ["https://nvd.nist.gov/vuln/detail/CVE-2024-0003"],
+        "description": "A medium test vulnerability",
+        "fix": {
+          "versions": ["1.2.0"],
+          "state": "fixed"
+        }
+      },
+      "artifact": {
+        "name": "medium-package",
+        "version": "1.0.0",
+        "type": "apk",
+        "purl": "pkg:alpine/medium-package@1.0.0",
+        "language": ""
+      },
+      "matchDetails": [
+        {
+          "type": "exact-direct-match",
+          "matcher": "apk-matcher"
+        }
+      ]
+    },
+    {
+      "vulnerability": {
+        "id": "CVE-2024-0004",
+        "dataSource": "https://nvd.nist.gov/vuln/data-feeds",
+        "namespace": "nvd:cpe",
+        "severity": "Low",
+        "urls": ["https://nvd.nist.gov/vuln/detail/CVE-2024-0004"],
+        "description": "A low test vulnerability",
+        "fix": {
+          "versions": ["0.9.1"],
+          "state": "fixed"
+        }
+      },
+      "artifact": {
+        "name": "low-package",
+        "version": "0.8.0",
+        "type": "apk",
+        "purl": "pkg:alpine/low-package@0.8.0",
+        "language": ""
+      },
+      "matchDetails": [
+        {
+          "type": "exact-direct-match",
+          "matcher": "apk-matcher"
+        }
+      ]
+    }
+  ]
+}
