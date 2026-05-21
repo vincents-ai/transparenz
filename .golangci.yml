@@ -1,5 +1,6 @@
 version: "2"
-
+run:
+  timeout: 5m
 linters:
   enable:
     - gosec
@@ -9,29 +10,23 @@ linters:
     - revive
     - unused
     - gocritic
-    - gofmt
-
-linters-settings:
-  revive:
+  settings:
+    revive:
+      rules:
+        - name: unused-parameter
+          disabled: true
+        - name: exported
+          disabled: true
+        - name: package-comments
+          disabled: true
+        - name: var-naming
+          disabled: true
+  exclusions:
     rules:
-      - name: unused-parameter
-        disabled: true
-      - name: exported
-        disabled: true
-      - name: package-comments
-        disabled: true
-      - name: var-naming
-        disabled: true
-
-issues:
-  exclude-rules:
-    # Don't apply gosec or errcheck to test files
-    - path: "_test\\.go"
-      linters:
-        - gosec
-        - errcheck
-
-    # Acceptable-to-ignore error returns
-    - linters:
-        - errcheck
-      text: "Error return value of `(.*\\.Close|rows\\.Err|tx\\.Rollback|http\\.Body\\.Close)` is not checked"
+      - path: _test\.go
+        linters:
+          - gosec
+          - errcheck
+formatters:
+  enable:
+    - gofmt
