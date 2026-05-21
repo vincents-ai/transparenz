@@ -117,12 +117,17 @@ func (g *generator) Generate(ctx context.Context, sourcePath string, format stri
 	result := string(output)
 
 	// Strip absolute source path from output to keep SBOMs reproducible.
-	// Always resolve to absolute first: Syft internally resolves "." and
-	// relative paths, embedding the absolute path in the SBOM name/namespace.
-	// Without this, relative inputs like "." leak the machine's working
-	// directory into the generated SBOM.
 	if absSource, err := filepath.Abs(sourcePath); err == nil && absSource != "." {
 		result = strings.ReplaceAll(result, absSource, ".")
+	}
+
+	// CycloneDX: inject a dependencies array so downstream consumers (and
+	// BSI TR-03183-2 compliance checks) can resolve the relationship graph.
+	if format == "cyclonedx" {
+		result, err = InjectDependencies(result, sbomModel)
+		if err != nil && g.verbose {
+			fmt.Fprintf(os.Stderr, "warning: could not inject dependencies: %v\n", err)
+		}
 	}
 
 	return result, nil
@@ -226,6 +231,126 @@ func injectScopeSPDX(doc map[string]interface{}, scope string) {
 		}
 		doc["documentComment"] = strings.Join(lines, "\n")
 	}
+}
+
+// InjectDependencies post-processes a CycloneDX JSON string and adds a
+// top-level "dependencies" array derived from the Syft SBOM relationship
+// graph.  If the serialised output already contains a non-empty dependencies
+// array the document is returned unchanged.
+func InjectDependencies(sbomJSON string, sbomModel *sbom.SBOM) (string, error) {
+	var doc map[string]interface{}
+	if err := json.Unmarshal([]byte(sbomJSON), &doc); err != nil {
+		return sbomJSON, fmt.Errorf("failed to parse CycloneDX JSON for dependency injection: %w", err)
+	}
+
+	// Skip if dependencies already present and non-empty
+	if existing, ok := doc["dependencies"].([]interface{}); ok && len(existing) > 0 {
+		return sbomJSON, nil
+	}
+
+	// Build a set of component bom-refs from the output
+	componentRefs := make(map[string]bool) // bom-ref -> exists
+	if components, ok := doc["components"].([]interface{}); ok {
+		for _, c := range components {
+			if comp, ok := c.(map[string]interface{}); ok {
+				if ref, ok := comp["bom-ref"].(string); ok && ref != "" {
+					componentRefs[ref] = true
+				}
+			}
+		}
+	}
+
+	// Determine the primary component ref from metadata.component
+	var primaryRef string
+	if metadata, ok := doc["metadata"].(map[string]interface{}); ok {
+		if mc, ok := metadata["component"].(map[string]interface{}); ok {
+			if ref, ok := mc["bom-ref"].(string); ok {
+				primaryRef = ref
+			}
+		}
+	}
+
+	// Build dependency map from Syft relationships: parent -> children
+	depMap := make(map[string][]string) // ref -> dependsOn refs
+
+	if sbomModel != nil {
+		// Build purl -> bom-ref lookup for resolution
+		purlToRef := make(map[string]string)
+		for ref := range componentRefs {
+			purlToRef[ref] = ref // bom-refs are already purl-based in our output
+		}
+
+		for _, rel := range sbomModel.Relationships {
+			from := rel.From
+			to := rel.To
+
+			var fromID, toID string
+			if idable, ok := from.(interface{ ID() artifact.ID }); ok {
+				fromID = string(idable.ID())
+			}
+			if idable, ok := to.(interface{ ID() artifact.ID }); ok {
+				toID = string(idable.ID())
+			}
+
+			if fromID == "" || toID == "" {
+				continue
+			}
+
+			depMap[fromID] = append(depMap[fromID], toID)
+		}
+	}
+
+	// If no relationships were found, build dependencies from the primary
+	// component to all other components
+	if len(depMap) == 0 && primaryRef != "" && len(componentRefs) > 0 {
+		var dependsOn []string
+		for ref := range componentRefs {
+			if ref != primaryRef {
+				dependsOn = append(dependsOn, ref)
+			}
+		}
+		if len(dependsOn) > 0 {
+			depMap[primaryRef] = dependsOn
+		}
+	}
+
+	// Also add individual component entries for any component not yet in depMap
+	for ref := range componentRefs {
+		if _, exists := depMap[ref]; !exists {
+			depMap[ref] = nil // empty dependsOn means leaf dependency
+		}
+	}
+
+	// Build the dependencies array
+	var dependencies []interface{}
+	for ref, deps := range depMap {
+		entry := map[string]interface{}{
+			"ref": ref,
+		}
+		if len(deps) > 0 {
+			// Deduplicate
+			seen := make(map[string]bool)
+			var uniqueDeps []string
+			for _, d := range deps {
+				if !seen[d] {
+					seen[d] = true
+					uniqueDeps = append(uniqueDeps, d)
+				}
+			}
+			entry["dependsOn"] = uniqueDeps
+		}
+		dependencies = append(dependencies, entry)
+	}
+
+	if len(dependencies) > 0 {
+		doc["dependencies"] = dependencies
+	}
+
+	out, err := json.Marshal(doc)
+	if err != nil {
+		return sbomJSON, fmt.Errorf("failed to re-serialise CycloneDX after dependency injection: %w", err)
+	}
+	return string(out), nil
 }
 
 // FormatSBOM converts SBOM model to specified format.

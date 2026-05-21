@@ -252,7 +252,7 @@ func TestEnrichSBOMModel(t *testing.T) {
 }
 
 func TestDetectLicense(t *testing.T) {
-	enricher := NewEnricher(".")
+	enricher := &enricher{sourcePath: "."}
 
 	tests := []struct {
 		pkg      string
@@ -276,7 +276,7 @@ func TestDetectLicense(t *testing.T) {
 }
 
 func TestDetectSupplier(t *testing.T) {
-	enricher := NewEnricher(".")
+	enricher := &enricher{sourcePath: "."}
 
 	tests := []struct {
 		pkg      string
@@ -319,7 +319,7 @@ func TestCalculateArtifactHash(t *testing.T) {
 }
 
 func TestBuildBSIProperties(t *testing.T) {
-	enricher := NewEnricher(".")
+	enricher := &enricher{sourcePath: "."}
 
 	// Test library component
 	libComp := map[string]interface{}{
@@ -349,7 +349,7 @@ func TestBuildBSIProperties(t *testing.T) {
 }
 
 func TestBuildBSIProperties_AllComponentTypes(t *testing.T) {
-	enricher := NewEnricher(".")
+	enricher := &enricher{sourcePath: "."}
 
 	tests := []struct {
 		compType        string
@@ -399,7 +399,7 @@ func TestBuildBSIProperties_AllComponentTypes(t *testing.T) {
 }
 
 func TestDetectLicense_EdgeCases(t *testing.T) {
-	enricher := NewEnricher(".")
+	enricher := &enricher{sourcePath: "."}
 
 	tests := []struct {
 		name     string
@@ -428,7 +428,7 @@ func TestDetectLicense_EdgeCases(t *testing.T) {
 }
 
 func TestDetectSupplier_PackagePatterns(t *testing.T) {
-	enricher := NewEnricher(".")
+	enricher := &enricher{sourcePath: "."}
 
 	tests := []struct {
 		name     string
@@ -869,7 +869,7 @@ func TestH1DigestToHex(t *testing.T) {
 }
 
 func TestBuildBSIAnnotations(t *testing.T) {
-	enricher := NewEnricher(".")
+	enricher := &enricher{sourcePath: "."}
 
 	t.Run("application type", func(t *testing.T) {
 		pkg := map[string]interface{}{
@@ -1068,7 +1068,7 @@ func TestEnrichWithArtifactHashes(t *testing.T) {
 }
 
 func TestEnrichCycloneDXWithArtifactHashes(t *testing.T) {
-	enricher := NewEnricher(".")
+	enricher := &enricher{sourcePath: "."}
 	tmpDir := t.TempDir()
 
 	artifactFile := filepath.Join(tmpDir, "myapp")
@@ -1100,7 +1100,7 @@ func TestEnrichCycloneDXWithArtifactHashes(t *testing.T) {
 }
 
 func TestEnrichSPDXWithArtifactHashes(t *testing.T) {
-	enricher := NewEnricher(".")
+	enricher := &enricher{sourcePath: "."}
 	tmpDir := t.TempDir()
 
 	artifactFile := filepath.Join(tmpDir, "mybinary")
@@ -1145,7 +1145,7 @@ func TestDetectLicenseFromText(t *testing.T) {
 }
 
 func TestAssertDependencyCompleteness(t *testing.T) {
-	enricher := NewEnricher(".")
+	enricher := &enricher{sourcePath: "."}
 
 	t.Run("CycloneDX adds completeness", func(t *testing.T) {
 		sbomData := map[string]interface{}{
@@ -1200,7 +1200,7 @@ func TestEnrichSBOM_EmptyJSON(t *testing.T) {
 }
 
 func TestGetKnownLicense(t *testing.T) {
-	enricher := NewEnricher(".")
+	enricher := &enricher{sourcePath: "."}
 
 	tests := []struct {
 		pkg      string
@@ -1290,7 +1290,7 @@ func TestExtractSupplierFromAuthors(t *testing.T) {
 }
 
 func TestLoadGoSum(t *testing.T) {
-	enricher := NewEnricher(".")
+	enricher := &enricher{sourcePath: "."}
 
 	t.Run("no go.sum file", func(t *testing.T) {
 		result := enricher.loadGoSum()
@@ -1315,9 +1315,7 @@ func TestLoadGoSum(t *testing.T) {
 	})
 }
 
-func contains(s, substr string) bool {
-	return strings.Contains(s, substr)
-}
+// contains is provided by validator.go in the same package
 
 // ---------------------------------------------------------------------------
 // TestEnrichWithBinaryHash – BSI TR-03183-2 §4.3 single-binary shortcut
@@ -1883,7 +1881,7 @@ func TestCollectGoModDirs(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	enricher := NewEnricher(tmpDir)
+	enricher := &enricher{sourcePath: tmpDir}
 	dirs := enricher.collectGoModDirs()
 
 	if _, ok := dirs["example.com/root"]; !ok {
@@ -1913,7 +1911,7 @@ func TestFindSubModuleDir(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	enricher := NewEnricher(tmpDir)
+	enricher := &enricher{sourcePath: tmpDir}
 
 	// Exact module path match
 	if dir := enricher.findSubModuleDir("example.com/staging/submod-a"); dir != subDirA {
@@ -1984,7 +1982,7 @@ func TestParseLicenseFile_SubModuleDir(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	enricher := NewEnricher(tmpDir)
+	enricher := &enricher{sourcePath: tmpDir}
 
 	// Exact module path – should resolve to MIT
 	result := enricher.parseLicenseFile("github.com/argoproj-labs/argocd-autoscaler")
@@ -2130,7 +2128,7 @@ func TestCollectGoModDirs_SkipsVendorAndHidden(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	enricher := NewEnricher(tmpDir)
+	enricher := &enricher{sourcePath: tmpDir}
 	dirs := enricher.collectGoModDirs()
 
 	if _, ok := dirs["example.com/valid"]; !ok {
@@ -2280,7 +2278,7 @@ func TestGetModulePath_NavigatesCache(t *testing.T) {
 
 	t.Setenv("GOPATH", fakeGopath)
 
-	enricher := NewEnricher(".")
+	enricher := &enricher{sourcePath: "."}
 
 	got := enricher.getModulePath("github.com/foo/bar")
 	if got != barDir {
@@ -2300,7 +2298,7 @@ func TestGetModulePath_SubPackageFallsBackToModule(t *testing.T) {
 
 	t.Setenv("GOPATH", fakeGopath)
 
-	enricher := NewEnricher(".")
+	enricher := &enricher{sourcePath: "."}
 	got := enricher.getModulePath("github.com/foo/bar/pkg/client")
 	if got != barDir {
 		t.Errorf("expected %s for sub-package, got %q", barDir, got)
@@ -2327,7 +2325,7 @@ func TestParseLicenseFile_ModuleCache(t *testing.T) {
 
 	t.Setenv("GOPATH", fakeGopath)
 
-	enricher := NewEnricher(".")
+	enricher := &enricher{sourcePath: "."}
 	got := enricher.parseLicenseFile(pkgName)
 	if got == "" {
 		t.Errorf("expected a license from module cache, got empty string")

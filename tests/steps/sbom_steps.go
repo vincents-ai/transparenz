@@ -316,11 +316,22 @@ func theJSONMetadataToolsArrayHasObjectWithField(ctx context.Context, field stri
 	if !ok {
 		return fmt.Errorf("no metadata found")
 	}
-	tools, ok := metadata["tools"].([]interface{})
-	if !ok || len(tools) == 0 {
-		return fmt.Errorf("no tools array found")
+
+	// Syft outputs tools as {"components": [{"name":"syft",...}]} rather than a bare array.
+	// Support both formats: bare array and wrapped object.
+	var toolEntries []interface{}
+	switch tv := metadata["tools"].(type) {
+	case []interface{}:
+		toolEntries = tv
+	case map[string]interface{}:
+		if comps, ok := tv["components"].([]interface{}); ok {
+			toolEntries = comps
+		}
 	}
-	for _, t := range tools {
+	if len(toolEntries) == 0 {
+		return fmt.Errorf("no tools found")
+	}
+	for _, t := range toolEntries {
 		tool, ok := t.(map[string]interface{})
 		if !ok {
 			continue

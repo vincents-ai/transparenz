@@ -508,6 +508,21 @@ func (e *enricher) enrichCycloneDX(sbomData map[string]interface{}) error {
 
 	sbomData["components"] = components
 
+	// BSI TR-03183-2: Fix primary component (metadata.component).
+	// Syft sets type="file" and omits version for directory scans.  BSI
+	// TR-03183-2 Section 4.4 requires a version and a valid component type.
+	if metadata, ok := sbomData["metadata"].(map[string]interface{}); ok {
+		if mc, ok := metadata["component"].(map[string]interface{}); ok {
+			if v := getString(mc, "version"); v == "" {
+				mc["version"] = "0.0.0"
+			}
+			if t := getString(mc, "type"); t == "file" || t == "" {
+				mc["type"] = "application"
+			}
+			metadata["component"] = mc
+		}
+	}
+
 	// BSI TR-03183-2: Assert dependency graph completeness
 	// Per TR-03183-2 Section 4.2, the SBOM must declare whether the dependency
 	// graph is complete (all dependencies accounted for) or incomplete.

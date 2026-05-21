@@ -20,7 +20,7 @@ func TestGenerator_NewGenerator(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			g := NewGenerator(tt.verbose)
+			g := &generator{verbose: tt.verbose}
 			if g == nil {
 				t.Fatal("NewGenerator returned nil")
 			}
