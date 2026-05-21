@@ -45,8 +45,8 @@ func RegisterSBOMSteps(s *godog.ScenarioContext) {
 // ─── Step implementations ─────────────────────────────────────────────────────
 
 func theOutputIsValidJSON(ctx context.Context) error {
-	data, ok := ctx.Value(KeyJSON).(interface{})
-	if !ok || data == nil {
+	data := ctx.Value(KeyJSON)
+	if data == nil {
 		return fmt.Errorf("output is not valid JSON")
 	}
 	return nil

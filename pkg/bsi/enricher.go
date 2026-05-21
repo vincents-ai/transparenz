@@ -548,21 +548,17 @@ func (e *enricher) buildBSIProperties(comp map[string]interface{}) []interface{}
 	case "application":
 		executable = "true"
 	case "library":
-		executable = "false"
 	case "framework":
-		executable = "false"
 	case "operating-system":
 		executable = "true"
 	case "container":
 		archive = "true"
 		executable = "true"
 	case "file":
-		executable = "false"
 	case "firmware":
 		executable = "true"
 	default:
 		// Default: assume library (most common for Go dependencies)
-		executable = "false"
 	}
 
 	// Check PURL for archive hints
