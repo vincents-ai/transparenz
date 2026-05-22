@@ -1,0 +1,123 @@
+publiccodeYmlVersion: "0.4"
+
+name: "transparenz"
+url: "https://github.com/vincents-ai/transparenz"
+softwareVersion: "0.1.0"
+releaseDate: "2026-05-21"
+
+platforms:
+  - linux
+  - mac
+  - windows
+
+categories:
+  - it-security
+  - compliance-management
+  - regulations-and-directives
+  - it-management
+
+developmentStatus: beta
+softwareType: "standalone/other"
+
+intendedAudience:
+  countries:
+    - AT
+    - BE
+    - BG
+    - CY
+    - CZ
+    - DE
+    - DK
+    - EE
+    - ES
+    - FI
+    - FR
+    - GR
+    - HR
+    - HU
+    - IE
+    - IT
+    - LT
+    - LU
+    - LV
+    - MT
+    - NL
+    - PL
+    - PT
+    - RO
+    - SE
+    - SI
+    - SK
+  scope:
+    - defence
+    - education
+    - emergency-services
+    - energy
+    - finance-and-economic-development
+    - government
+    - healthcare
+    - infrastructures
+    - justice
+    - local-authorities
+    - manufacturing
+    - research
+    - science-and-technology
+    - security
+    - transportation
+
+localisation:
+  localisationReady: true
+  availableLanguages:
+    - en
+
+description:
+  en:
+    localisedName: "transparenz"
+    shortDescription: >
+      BSI TR-03183-2 compliant SBOM generator for EU Cyber Resilience Act
+      compliance, with cryptographic hash enrichment and license detection.
+    longDescription: >
+      transparenz is a CLI tool for generating, enriching, validating, and
+      submitting BSI TR-03183-2 compliant Software Bills of Materials (SBOMs).
+      It targets the requirements of the EU Cyber Resilience Act (CRA) and
+      produces CycloneDX 1.6 JSON and SPDX 2.3 JSON output.
+
+      The tool uses the native Syft library for dependency discovery — no
+      external subprocess calls — and provides a single static binary for
+      deployment in government and enterprise environments.
+
+      BSI TR-03183-2 enrichment includes: SHA-512 artifact hashes computed
+      from compiled binaries, namespace-based supplier detection, SPDX
+      license identification and normalisation, component classification
+      (executable, archive, structured properties), and dependency
+      completeness assertions.
+
+      The built-in `bsi-check` validator produces a weighted compliance
+      report across six categories: SHA-512 hash coverage (30%), license
+      coverage (25%), supplier coverage (15%), component properties (15%),
+      dependency completeness (10%), and format version (5%). An SBOM is
+      marked compliant when all six categories individually meet their
+      thresholds.
+
+      transparenz also supports standalone vulnerability scanning via the
+      native Grype library, PostgreSQL-backed SBOM persistence, and direct
+      SBOM submission to a remote server endpoint with Bearer token
+      authentication.
+
+      Distributed as a single static Go binary with no runtime
+      dependencies, designed for CI/CD integration, SBOM toolchains, and
+      compliance workflows across all EU member states.
+    features:
+      - "BSI TR-03183-2 compliant SBOM generation (CycloneDX 1.6, SPDX 2.3)"
+      - "SHA-512 hash enrichment from compiled binaries"
+      - "SPDX license identification and normalisation"
+      - "Supplier detection and component classification"
+      - "Dependency completeness assertion"
+      - "Weighted BSI compliance scoring (bsi-check)"
+      - "Standalone vulnerability scanning via native Grype library"
+      - "SBOM submission to remote server with Bearer token auth"
+      - "PostgreSQL-backed SBOM persistence and search"
+      - "Single static binary — no runtime dependencies"
+
+legal:
+  license: AGPL-3.0-or-later
