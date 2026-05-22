@@ -95,11 +95,15 @@ unless overridden with --content-type.
 
 The server URL and bearer token may be provided via flags or environment variables:
   TRANSPARENZ_SERVER_URL  — remote endpoint URL
-  TRANSPARENZ_TOKEN       — bearer token for Authorization header
+  TRANSPARENZ_TOKEN       — bearer token for Authorization header (recommended)
+
+Using environment variables is recommended to avoid exposing tokens in
+process listings (ps aux) and shell history.
 
 Example usage:
-  transparenz submit --file sbom.json --url https://sbom.example.com/api/sbom --token my-token
-  cat sbom.json | transparenz submit --url https://sbom.example.com/api/sbom --token my-token`,
+  export TRANSPARENZ_TOKEN=my-secret-token
+  transparenz submit --file sbom.json --url https://sbom.example.com/api/sbom
+  cat sbom.json | transparenz submit --url https://sbom.example.com/api/sbom`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		// Resolve URL from flag or env
 		if submitURL == "" {
@@ -112,9 +116,12 @@ Example usage:
 		// Resolve token from flag or env
 		if submitToken == "" {
 			submitToken = os.Getenv("TRANSPARENZ_TOKEN")
+		} else {
+			// --token flag is deprecated — visible in ps aux and shell history
+			fmt.Fprintf(os.Stderr, "WARNING: --token flag is deprecated and will be removed in a future version. Use TRANSPARENZ_TOKEN environment variable instead.\n")
 		}
 		if submitToken == "" {
-			return fmt.Errorf("bearer token is required (use --token or TRANSPARENZ_TOKEN)")
+			return fmt.Errorf("bearer token is required (set TRANSPARENZ_TOKEN or use --token)")
 		}
 
 		// Read SBOM bytes
@@ -147,7 +154,7 @@ func init() {
 
 	submitCmd.Flags().StringVarP(&submitFile, "file", "f", "", "Path to SBOM file to submit (reads stdin if not set)")
 	submitCmd.Flags().StringVar(&submitURL, "url", "", "Server endpoint URL (or TRANSPARENZ_SERVER_URL env var)")
-	submitCmd.Flags().StringVar(&submitToken, "token", "", "Bearer authentication token (or TRANSPARENZ_TOKEN env var)")
+	submitCmd.Flags().StringVar(&submitToken, "token", "", "DEPRECATED: use TRANSPARENZ_TOKEN env var instead")
 	submitCmd.Flags().IntVar(&submitTimeout, "timeout", 30, "HTTP timeout in seconds")
 	submitCmd.Flags().BoolVar(&submitInsecure, "insecure", false, "Skip TLS certificate verification (prints a warning to stderr)")
 	submitCmd.Flags().StringVar(&submitContentType, "content-type", "", "Override Content-Type header (default: auto-detect from SBOM content)")
