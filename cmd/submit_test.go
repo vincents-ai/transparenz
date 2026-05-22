@@ -281,5 +281,5 @@ func TestSubmitInsecurePrintsWarningToStderr(t *testing.T) {
 	os.Stderr = old
 
 	captured, _ := io.ReadAll(r)
-	assert.Contains(t, string(captured), "WARNING: TLS verification disabled")
+	assert.Contains(t, string(captured), "SECURITY WARNING: TLS certificate verification is DISABLED")
 }
