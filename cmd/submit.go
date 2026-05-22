@@ -41,7 +41,7 @@ func detectContentType(data []byte) string {
 func postSBOM(url, token, contentType string, data []byte, timeoutSecs int, insecure bool) error {
 	transport := &http.Transport{}
 	if insecure {
-		fmt.Fprintln(os.Stderr, "WARNING: TLS verification disabled")
+		fmt.Fprintln(os.Stderr, "SECURITY WARNING: TLS certificate verification is DISABLED. This should only be used in development or airgap environments.")
 		transport.TLSClientConfig = &tls.Config{InsecureSkipVerify: true} //nolint:gosec // user opted in
 	}
 
@@ -156,6 +156,6 @@ func init() {
 	submitCmd.Flags().StringVar(&submitURL, "url", "", "Server endpoint URL (or TRANSPARENZ_SERVER_URL env var)")
 	submitCmd.Flags().StringVar(&submitToken, "token", "", "DEPRECATED: use TRANSPARENZ_TOKEN env var instead")
 	submitCmd.Flags().IntVar(&submitTimeout, "timeout", 30, "HTTP timeout in seconds")
-	submitCmd.Flags().BoolVar(&submitInsecure, "insecure", false, "Skip TLS certificate verification (prints a warning to stderr)")
+	submitCmd.Flags().BoolVar(&submitInsecure, "insecure", false, "Skip TLS certificate verification (development only, not for production)")
 	submitCmd.Flags().StringVar(&submitContentType, "content-type", "", "Override Content-Type header (default: auto-detect from SBOM content)")
 }
