@@ -1,249 +1,62 @@
-# transparenz - Interface Design Improvement Plan
+# transparenz - Architecture Improvements Tracker
 
-## Current State Assessment
+**Last updated:** 2026-05-21
 
-**Status**: Not interface-designed (uses concrete types)
-**Effort Required**: Medium-Large
+## Completed
 
-### Existing Interfaces
+### Interface Extraction ✅
 
-**None found** - transparenz primarily uses concrete struct types:
+The following interfaces are now in place:
 
-| Concrete Type | Location | Purpose |
-|---------------|----------|---------|
-| `bsi.Enricher` | `pkg/bsi/enricher.go:44` | BSI TR-03183-2 compliance enrichment |
-| `sbom.Generator` | `pkg/sbom/generator.go:35` | SBOM generation using Syft |
-| `sbom.VulnzMatcher` | `pkg/sbom/vulnz_matcher.go:48` | Vulnerability matching |
-| `sbom.MatchIndex` | `pkg/sbom/vulnz_matcher.go:28` | Index for vulnerability matching |
+| Interface | Location | Constructor |
+|-----------|----------|-------------|
+| `BSIEnricher` | `pkg/bsi/enricher.go` | `NewEnricher(sourcePath string) BSIEnricher` |
+| `SBOMGenerator` | `pkg/sbom/generator.go` | `NewGenerator(verbose bool) SBOMGenerator` |
 
-### Current Usage Pattern
+Both use the return-interface-from-constructor pattern. Internal `enricher`/`generator` structs are unexported.
 
-All components are used as concrete types:
+### BSI TR-03183-2 Compliance ✅
 
-```go
-// pkg/bsi/enricher.go
-func NewEnricher(sourcePath string) *Enricher { ... }
+79 BDD scenarios covering all major requirements:
+- Format compliance (CycloneDX 1.6, SPDX 2.3)
+- Document metadata (timestamp, tools, spec version)
+- Primary component (name, version, type, supplier)
+- Component fields (name, version, purl, type, supplier)
+- License requirements (SPDX identifiers)
+- Hash requirements (SHA-512 mandatory)
+- Component properties (executable, archive, structured)
+- Dependency relationships
+- BSI check compliance report
+- SBOM delivery and export
 
-// pkg/sbom/generator.go
-func NewGenerator(verbose bool) *Generator { ... }
+### CI Pipeline ✅
 
-// pkg/sbom/vulnz_matcher.go
-func NewVulnzMatcher() *VulnzMatcher { ... }
-```
+Full GitHub Actions CI:
+- **lint**: golangci-lint v2.11.4 with Go 1.25
+- **build**: compiles all packages
+- **test**: unit + integration tests with race detector
+- **self-sbom**: generates self-SBOM as artifact
 
-No dependency injection - all code uses concrete return types.
+## Planned
 
-## Required Refactoring
+### Dependency Injection Container (Priority: Low)
 
-### 1. Extract SBOM Generator Interface (Priority: High)
+A DI container (`pkg/container.go`) exists but is not yet wired into commands. Current command code constructs dependencies inline. Full DI wiring would improve testability of `cmd/` layer.
 
-**Problem**: `Generator` is used as concrete type throughout `cmd/` and `pkg/`.
+### CSAF 2.0 Advisory Generation (Priority: High)
 
-**Solution**:
-```go
-// pkg/sbom/generator.go
-type SBOMGenerator interface {
-    // Generate creates an SBOM from the specified source
-    Generate(ctx context.Context, source string, opts ...GenerateOption) (*sbom.SBOM, error)
-    
-    // SupportedFormats returns list of supported output formats
-    SupportedFormats() []string
-    
-    // ValidateFormat checks if the format is supported
-    ValidateFormat(format string) bool
-}
+CSAF advisory generation lives in `transparenz-server`, not the CLI. A future `csaf` subcommand could be added.
 
-type GenerateOption func(*GenerateConfig)
+### VEX Document Generation (Priority: Medium)
 
-type GenerateConfig struct {
-    Format string
-    Scope  string
-}
+Vulnerability Exploitability eXchange (VEX) documents are planned.
 
-// Keep concrete type for internal implementation
-type generator struct { /* ... */ }
+### Improved Test Coverage
 
-func NewGenerator(verbose bool) SBOMGenerator {
-    return &generator{verbose: verbose}
-}
-```
-
-**Files to modify**:
-- `pkg/sbom/generator.go` - extract interface, update constructor
-- `cmd/generate.go` - accept `SBOMGenerator` interface
-- `cmd/bsi.go` - accept `SBOMGenerator` interface
-- All test files using `Generator`
-
-### 2. Extract BSI Enricher Interface (Priority: High)
-
-**Problem**: `Enricher` is used as concrete type, making testing difficult.
-
-**Solution**:
-```go
-// pkg/bsi/enricher.go
-type BSIEnricher interface {
-    // Enrich adds BSI TR-03183-2 compliance data to an SBOM
-    Enrich(sbom *sbom.SBOM) error
-    
-    // Validate checks if an SBOM meets BSI TR-03183-2 requirements
-    Validate(sbom *sbom.SBOM) (*ComplianceResult, error)
-    
-    // EnrichWithBSD enriches an SBOM with BSD file-level annotations
-    EnrichWithBSD(sbom *sbom.SBOM) error
-}
-
-type ComplianceResult struct {
-    Compliant bool
-    Findings  []BSIFinding
-    Score     float64
-}
-
-// Keep concrete type
-type enricher struct { /* ... */ }
-
-func NewEnricher(sourcePath string) BSIEnricher {
-    return &enricher{sourcePath: sourcePath}
-}
-```
-
-**Files to modify**:
-- `pkg/bsi/enricher.go` - extract interface, update constructor
-- `cmd/bsi.go` - accept `BSIEnricher` interface
-- `cmd/validate.go` - accept `BSIEnricher` interface
-- All test files using `Enricher`
-
-### 3. Extract Vulnerability Matcher Interface (Priority: High)
-
-**Problem**: `VulnzMatcher` is used as concrete type.
-
-**Solution**:
-```go
-// pkg/sbom/vulnz_matcher.go
-type VulnerabilityMatcher interface {
-    // Match matches SBOM components against vulnerability data
-    Match(ctx context.Context, sbom *sbom.SBOM, vulnzData []VulnerabilityMatch) error
-    
-    // BuildIndex builds the match index from vulnerability data
-    BuildIndex(vulnzData []VulnerabilityMatch) error
-    
-    // GetMatches returns matches for a specific component
-    GetMatches(component SBOMComponent) []VulnerabilityMatch
-}
-
-// Keep concrete type
-type vulnzMatcher struct { /* ... */ }
-
-func NewVulnzMatcher() VulnerabilityMatcher {
-    return &vulnzMatcher{
-        matchIdx: NewMatchIndex(),
-    }
-}
-```
-
-**Files to modify**:
-- `pkg/sbom/vulnz_matcher.go` - extract interface, update constructor
-- Files using `VulnzMatcher`
-- Test files
-
-### 4. Extract Validator Interface (Priority: Medium)
-
-**Problem**: BSI validation logic is embedded in `Enricher`.
-
-**Solution**:
-```go
-// pkg/bsi/validator.go (new file)
-type BSIValidator interface {
-    Validate(sbom *sbom.SBOM) (*ValidationResult, error)
-}
-
-type ValidationResult struct {
-    Valid    bool
-    Findings []ValidationFinding
-}
-```
-
-**Files to create/modify**:
-- `pkg/bsi/validator.go` (new file)
-- `pkg/bsi/enricher.go` - use `BSIValidator`
-
-### 5. Add CLI Command Interface (Priority: Medium)
-
-**Problem**: CLI commands don't use interfaces.
-
-**Solution**:
-```go
-// cmd/command.go (new file)
-type CLICommand interface {
-    Execute(ctx context.Context, args []string) error
-    Name() string
-    Description() string
-}
-
-// Each command implements this interface
-type GenerateCommand struct { /* ... */ }
-type BSICommand struct { /* ... */ }
-type ValidateCommand struct { /* ... */ }
-```
-
-**Files to modify**:
-- `cmd/generate.go`
-- `cmd/bsi.go`
-- `cmd/validate.go`
-- `cmd/root.go`
-
-### 6. Create Dependency Injection Container (Priority: Low)
-
-**Problem**: No dependency injection - all components created inline.
-
-**Solution**:
-```go
-// pkg/container.go (new file)
-type Container struct {
-    Generator    sbom.SBOMGenerator
-    Enricher     bsi.BSIEnricher
-    Matcher      sbom.VulnerabilityMatcher
-    // ... other dependencies
-}
-
-func NewContainer(opts ...ContainerOption) *Container { /* ... */ }
-```
-
-**Files to create**:
-- `pkg/container.go`
-
-## Implementation Order
-
-1. **Phase 1** (3-4 hours): Extract `SBOMGenerator` interface
-2. **Phase 2** (3-4 hours): Extract `BSIEnricher` interface
-3. **Phase 3** (2-3 hours): Extract `VulnerabilityMatcher` interface
-4. **Phase 4** (2-3 hours): Extract `BSIValidator` interface
-5. **Phase 5** (2-3 hours): Add CLI Command interface
-6. **Phase 6** (2-3 hours): Create Dependency Injection Container
-
-**Total estimated effort**: 14-20 hours
-
-## Testing Strategy
-
-- Create mock implementations for each interface
-- Update all existing tests to use interfaces
-- Add interface-based unit tests
-- Ensure integration tests still pass
-- Use `testify/mock` or similar for mock generation
-
-## Success Criteria
-
-- [ ] `SBOMGenerator` interface extracted and used throughout
-- [ ] `BSIEnricher` interface extracted and used throughout
-- [ ] `VulnerabilityMatcher` interface extracted and used throughout
-- [ ] `BSIValidator` interface extracted (optional)
-- [ ] CLI commands use interfaces (optional)
-- [ ] Dependency injection container created (optional)
-- [ ] All existing tests pass with interface changes
-- [ ] New mock-based tests added
-- [ ] Documentation updated with interface usage examples
+- `internal/repository` integration tests need database CI service
+- Property-based fuzz targets could be expanded
+- Enrichment edge cases for non-Go ecosystems (npm, Maven, pip)
 
 ## Migration Notes
 
-- This is a **breaking change** for any external code using transparenz as a library
-- Consider using a deprecation period where both concrete types and interfaces are supported
-- Tag a new major version (v2.0.0) after completion
+External consumers using transparenz as a library should use the `BSIEnricher` and `SBOMGenerator` interfaces rather than concrete types.

@@ -1,7 +1,7 @@
 # BSI TR-03183-2 Compliance Test Coverage
 
-**Generated:** 2026-03-28  
-**Project:** transparenz-go (BSI TR-03183-2 Compliant SBOM Generator)  
+**Generated:** 2026-05-21  
+**Project:** transparenz (BSI TR-03183-2 Compliant SBOM Generator)  
 **Source:** https://www.bsi.bund.de/SharedDocs/Downloads/EN/BSI/Publications/TechGuidelines/TR03183/BSI-TR-03183-2.pdf
 
 ---

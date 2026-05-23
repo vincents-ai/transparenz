@@ -99,6 +99,8 @@ transparenz generate [source] [flags]
 | `--manufacturer` | | | SBOM producer organisation name (also: `TRANSPARENZ_MANUFACTURER`) |
 | `--manufacturer-url` | | | SBOM producer organisation URL (also: `TRANSPARENZ_MANUFACTURER_URL`) |
 | `--binary` | | | Path to compiled binary for SHA-512 hash injection (requires `--bsi-compliant`) |
+| `--scope` | | `source` | SBOM scope: `source` (dependency manifests) or `binary` (compiled binary/container image) |
+| `--no-fetch` | | `false` | Skip pre-scan dependency fetching (disables `go mod download`, etc.) |
 | `--submit` | | `false` | Submit generated SBOM to a remote server after generation |
 | `--server-url` | | | Remote server endpoint URL (also: `TRANSPARENZ_SERVER_URL`) |
 | `--token` | | | Bearer authentication token (also: `TRANSPARENZ_TOKEN`) |
@@ -167,6 +169,24 @@ transparenz bsi-check [sbom-path] [flags]
 transparenz bsi-check sbom.json
 transparenz bsi-check sbom.json --output report.json
 ```
+
+---
+
+### `validate [sbom-path]`
+
+Validate an SBOM against BSI TR-03183-2 requirements. Alias for `bsi-check` with a focus on pass/fail validation.
+
+```
+transparenz validate [sbom-path]
+```
+
+Checks:
+- Hash algorithm (SHA-512 mandatory per BSI TR-03183-2)
+- License coverage (SPDX identifiers for all components)
+- Supplier coverage (supplier/author information for all components)
+- Component properties (`executable`, `archive`, `structured`)
+- Dependency completeness assertion
+- Format version (CycloneDX 1.6+ or SPDX 2.3+)
 
 ---
 

@@ -12,7 +12,7 @@ The simplest deployment method - just copy the binary:
 
 ```bash
 # Download the latest release
-curl -L https://github.com/deutschland-stack/transparenz-go/releases/latest/download/transparenz-linux-amd64 -o transparenz
+curl -L https://github.com/vincents-ai/transparenz/releases/latest/download/transparenz-linux-amd64 -o transparenz
 chmod +x transparenz
 sudo mv transparenz /usr/local/bin/
 
@@ -38,17 +38,17 @@ Use the official Docker image (FROM scratch, <10MB):
 
 ```bash
 # Pull image
-docker pull ghcr.io/deutschland-stack/transparenz:latest
+docker pull ghcr.io/vincents-ai/transparenz:latest
 
 # Run generate command
-docker run --rm -v $(pwd):/workspace ghcr.io/deutschland-stack/transparenz:latest \
+docker run --rm -v $(pwd):/workspace ghcr.io/vincents-ai/transparenz:latest \
   generate /workspace --format spdx --output /workspace/sbom.json
 
 # Run with database
 docker run --rm \
   -e DATABASE_URL="postgresql://user:pass@host:5432/transparenz" \
   -v $(pwd):/workspace \
-  ghcr.io/deutschland-stack/transparenz:latest \
+  ghcr.io/vincents-ai/transparenz:latest \
   generate /workspace --format spdx --save
 ```
 
@@ -70,7 +70,7 @@ services:
       - "5432:5432"
 
   transparenz:
-    image: ghcr.io/deutschland-stack/transparenz:latest
+    image: ghcr.io/vincents-ai/transparenz:latest
     depends_on:
       - postgres
     environment:
@@ -89,15 +89,15 @@ For NixOS or systems with Nix installed:
 
 ```bash
 # Run directly via flake
-nix run github:deutschland-stack/transparenz-go -- generate .
+nix run github:vincents-ai/transparenz -- generate .
 
 # Install to profile
-nix profile install github:deutschland-stack/transparenz-go
+nix profile install github:vincents-ai/transparenz
 
 # Add to NixOS configuration.nix
 environment.systemPackages = [
   (import (builtins.fetchTarball {
-    url = "https://github.com/deutschland-stack/transparenz-go/archive/main.tar.gz";
+    url = "https://github.com/vincents-ai/transparenz/archive/main.tar.gz";
   })).packages.${pkgs.system}.default
 ];
 ```
@@ -105,7 +105,7 @@ environment.systemPackages = [
 ### 4. Homebrew (macOS/Linux)
 
 ```bash
-brew tap deutschland-stack/transparenz
+brew tap vincents-ai/transparenz
 brew install transparenz
 ```
 
@@ -233,7 +233,7 @@ spec:
     spec:
       containers:
       - name: transparenz
-        image: ghcr.io/deutschland-stack/transparenz:latest
+        image: ghcr.io/vincents-ai/transparenz:latest
         envFrom:
         - configMapRef:
             name: transparenz-config
@@ -262,7 +262,7 @@ spec:
 # .gitlab-ci.yml
 sbom_generate:
   stage: build
-  image: ghcr.io/deutschland-stack/transparenz:latest
+  image: ghcr.io/vincents-ai/transparenz:latest
   variables:
     DATABASE_URL: "postgresql://transparenz:$DB_PASSWORD@postgres:5432/transparenz"
   services:
@@ -318,7 +318,7 @@ jobs:
 
       - name: Download Transparenz
         run: |
-          curl -L https://github.com/deutschland-stack/transparenz-go/releases/latest/download/transparenz-linux-amd64 -o transparenz
+          curl -L https://github.com/vincents-ai/transparenz/releases/latest/download/transparenz-linux-amd64 -o transparenz
           chmod +x transparenz
           sudo mv transparenz /usr/local/bin/
 
@@ -358,7 +358,7 @@ pipeline {
         stage('Setup') {
             steps {
                 sh '''
-                    curl -L https://github.com/deutschland-stack/transparenz-go/releases/latest/download/transparenz-linux-amd64 -o transparenz
+                    curl -L https://github.com/vincents-ai/transparenz/releases/latest/download/transparenz-linux-amd64 -o transparenz
                     chmod +x transparenz
                 '''
             }
@@ -439,7 +439,7 @@ Verify binary integrity using checksums:
 
 ```bash
 # Download checksum file
-curl -L https://github.com/deutschland-stack/transparenz-go/releases/latest/download/checksums.txt -o checksums.txt
+curl -L https://github.com/vincents-ai/transparenz/releases/latest/download/checksums.txt -o checksums.txt
 
 # Verify binary
 sha256sum -c checksums.txt --ignore-missing
@@ -588,9 +588,9 @@ find /backups -name "transparenz_*.sql.gz" -mtime +30 -delete
 
 ## Support
 
-- GitHub Issues: https://github.com/deutschland-stack/transparenz-go/issues
-- Documentation: https://github.com/deutschland-stack/transparenz-go/blob/main/README.md
-- Python Version: https://github.com/deutschland-stack/transparenz
+- GitHub Issues: https://github.com/vincents-ai/transparenz/issues
+- Documentation: https://github.com/vincents-ai/transparenz/blob/main/README.md
+- Python Version: https://github.com/vincents-ai/transparenz
 
 > **Commands reference:** See README.md for the full commands reference, including `enrich`, `submit`, and `db export`.
 
