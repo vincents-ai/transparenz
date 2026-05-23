@@ -141,8 +141,8 @@ func TestParseSBOMComponents_EmptyComponents(t *testing.T) {
 
 func TestExtractCycloneDXPURL_Present(t *testing.T) {
 	comp := map[string]interface{}{
-		"name":  "test",
-		"purl":  "pkg:npm/test@1.0.0",
+		"name": "test",
+		"purl": "pkg:npm/test@1.0.0",
 	}
 	assert.Equal(t, "pkg:npm/test@1.0.0", extractCycloneDXPURL(comp))
 }
@@ -196,8 +196,8 @@ func TestToString(t *testing.T) {
 func TestParseCycloneDXComponents_SkipsInvalid(t *testing.T) {
 	raw := []interface{}{
 		map[string]interface{}{"name": "valid", "version": "1.0"},
-		"not a map",  // should be skipped
-		42,            // should be skipped
+		"not a map",                              // should be skipped
+		42,                                       // should be skipped
 		map[string]interface{}{"version": "2.0"}, // no name, skipped
 	}
 	components := parseCycloneDXComponents(raw)
@@ -208,7 +208,7 @@ func TestParseCycloneDXComponents_SkipsInvalid(t *testing.T) {
 func TestParseSPDXComponents_UsesSPDXID(t *testing.T) {
 	raw := []interface{}{
 		map[string]interface{}{
-			"SPDXID":     "SPDXRef-pkg-1",
+			"SPDXID":      "SPDXRef-pkg-1",
 			"versionInfo": "1.0",
 		},
 	}
