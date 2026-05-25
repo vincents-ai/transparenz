@@ -800,8 +800,10 @@ func (e *enricher) parseLicenseFile(packageName string) string {
 	// Common license file names - include NOTICE
 	licenseFiles := []string{
 		"LICENSE",
+		"License", // Go ecosystem convention (github.com/jinzhu/*, etc.)
 		"LICENSE.txt",
 		"LICENSE.md",
+		"LICENSE.code",
 		"COPYING",
 		"LICENSE-MIT",
 		"LICENSE-APACHE",
@@ -1109,6 +1111,23 @@ func (e *enricher) getModulePath(packageName string) string {
 		}
 	}
 
+	// Handle single-segment modules (e.g. "go.opencensus.io", "go4.org").
+	// These are stored directly in the module cache root as "name@version/".
+	if len(parts) == 1 {
+		lastName := strings.ToLower(parts[0])
+		entries, err := os.ReadDir(modCachePath)
+		if err == nil {
+			for _, entry := range entries {
+				if !entry.IsDir() {
+					continue
+				}
+				if strings.HasPrefix(strings.ToLower(entry.Name()), lastName+"@") {
+					return filepath.Join(modCachePath, entry.Name())
+				}
+			}
+		}
+	}
+
 	return ""
 }
 
@@ -1123,23 +1142,51 @@ func (e *enricher) getModulePath(packageName string) string {
 // as "!<lowercase>" (e.g. "Azure" → "!azure"). We handle this by doing a
 // case-insensitive prefix match on the final directory component.
 func findVersionedModDir(modCachePath, modulePath string) string {
-	// Convert the module path to the filesystem path used by the cache.
-	// The Go toolchain escapes uppercase to "!<lower>" but we do a
-	// case-insensitive scan so we don't need to re-implement the encoding.
+	// The Go module cache stores modules as:
+	//
+	//   <modCachePath>/<host>/<org>/<repo>@<version>/
+	//
+	// Go applies case-encoding: uppercase letters are escaped as "!<lowercase>"
+	// (e.g. "Azure" → "!azure", "CycloneDX" → "!cyclone!d!x"). We do
+	// case-insensitive matching at each directory level to handle this.
 	parts := strings.Split(modulePath, "/")
 	if len(parts) < 2 {
 		return ""
 	}
 
-	// The parent directory of the versioned entry is everything except the last
-	// path component: e.g. for "github.com/foo/bar" the parent is
-	// "$modCache/github.com/foo" and we scan for entries starting with "bar@".
+	// Walk the parent path segments with case-insensitive matching.
+	// For "github.com/Azure/go-ansiterm":
+	//   parentDir = modCachePath
+	//   → match "github.com" (exact, no encoding)
+	//   → match "!azure" (case-insensitive match for "Azure")
+	//   → scan for entries starting with "go-ansiterm@"
 	parentParts := parts[:len(parts)-1]
 	lastName := strings.ToLower(parts[len(parts)-1])
 
 	parentDir := modCachePath
-	for _, p := range parentParts {
-		parentDir = filepath.Join(parentDir, p)
+	for _, seg := range parentParts {
+		entries, err := os.ReadDir(parentDir)
+		if err != nil {
+			return ""
+		}
+		found := false
+		for _, entry := range entries {
+			if !entry.IsDir() {
+				continue
+			}
+			// Compare case-insensitively: "Azure" matches "!azure",
+			// "CycloneDX" matches "!cyclone!d!x", etc.
+			// Strip all case-encoding "!" prefixes from each segment.
+			entryName := decodeGoCase(entry.Name())
+			if strings.EqualFold(entryName, seg) {
+				parentDir = filepath.Join(parentDir, entry.Name())
+				found = true
+				break
+			}
+		}
+		if !found {
+			return ""
+		}
 	}
 
 	entries, err := os.ReadDir(parentDir)
@@ -1147,23 +1194,38 @@ func findVersionedModDir(modCachePath, modulePath string) string {
 		return ""
 	}
 
-	// Pick the most recent version by choosing the last lexicographic entry
-	// that matches "<lastName>@" (or "!<lastName>@" for case-encoded names).
-	// In practice we just return the first match; callers only need any valid
-	// path to read a LICENSE file from.
+	// Scan for versioned entry matching "<lastName>@"
 	for _, entry := range entries {
 		if !entry.IsDir() {
 			continue
 		}
-		entryLower := strings.ToLower(entry.Name())
-		// Strip leading "!" characters used for case-encoding.
-		stripped := strings.TrimLeft(entryLower, "!")
-		if strings.HasPrefix(stripped, lastName+"@") {
+		stripped := decodeGoCase(entry.Name())
+		if strings.HasPrefix(strings.ToLower(stripped), lastName+"@") {
 			return filepath.Join(parentDir, entry.Name())
 		}
 	}
 
 	return ""
+}
+
+// decodeGoCase decodes Go module cache case-encoding.
+// Go encodes uppercase letters as "!<lowercase>": "Azure" → "!azure",
+// "CycloneDX" → "!cyclone!d!x", "STARRY-S" → "!s!t!a!r!r!y!-s".
+// This function strips the encoding, returning the original case-sensitive form
+// (lowercased for comparison purposes).
+func decodeGoCase(name string) string {
+	var b strings.Builder
+	i := 0
+	for i < len(name) {
+		if name[i] == '!' && i+1 < len(name) {
+			b.WriteByte(name[i+1])
+			i += 2
+		} else {
+			b.WriteByte(name[i])
+			i++
+		}
+	}
+	return b.String()
 }
 
 // h1DigestToHex converts a base64-encoded h1 digest to hex-encoded SHA-256
