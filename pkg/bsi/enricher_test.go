@@ -881,7 +881,7 @@ func TestBuildBSIAnnotations(t *testing.T) {
 		}
 		ann := annotations[0].(map[string]interface{})
 		comment := ann["comment"].(string)
-		if !contains(comment, "executable=true") {
+		if !strings.Contains(comment, "executable=true") {
 			t.Errorf("Expected executable=true, got %s", comment)
 		}
 	})
@@ -893,7 +893,7 @@ func TestBuildBSIAnnotations(t *testing.T) {
 		annotations := enricher.buildBSIAnnotations(pkg)
 		ann := annotations[0].(map[string]interface{})
 		comment := ann["comment"].(string)
-		if !contains(comment, "executable=false") {
+		if !strings.Contains(comment, "executable=false") {
 			t.Errorf("Expected executable=false, got %s", comment)
 		}
 	})
@@ -903,7 +903,7 @@ func TestBuildBSIAnnotations(t *testing.T) {
 		annotations := enricher.buildBSIAnnotations(pkg)
 		ann := annotations[0].(map[string]interface{})
 		comment := ann["comment"].(string)
-		if !contains(comment, "executable=false") {
+		if !strings.Contains(comment, "executable=false") {
 			t.Errorf("Expected executable=false, got %s", comment)
 		}
 	})

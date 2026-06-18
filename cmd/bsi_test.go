@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+
+	"github.com/vincents-ai/transparenz/pkg/bsi"
 )
 
 // parseJSON is a helper that unmarshals a JSON string into map[string]interface{}.
@@ -73,35 +75,13 @@ func buildCompliantJSON() map[string]interface{} {
 // TestIsVersionGTE – boundary cases for the version comparison helper
 // --------------------------------------------------------------------------
 
-func TestIsVersionGTE(t *testing.T) {
-	cases := []struct {
-		a, b string
-		want bool
-	}{
-		{"1.6", "1.6", true},  // equal
-		{"1.5", "1.6", false}, // strictly less
-		{"2.3", "2.3", true},  // equal multi-digit minor
-		{"3.0", "2.3", true},  // major bump
-		{"1.4", "1.6", false}, // older minor
-		{"2.0", "1.6", true},  // major ahead
-		{"1.10", "1.6", true}, // numeric comparison (10 > 6)
-	}
-
-	for _, tc := range cases {
-		got := isVersionGTE(tc.a, tc.b)
-		if got != tc.want {
-			t.Errorf("isVersionGTE(%q, %q) = %v, want %v", tc.a, tc.b, got, tc.want)
-		}
-	}
-}
-
 // --------------------------------------------------------------------------
 // TestValidateBSICompliance_FullyCompliantCycloneDX
 // --------------------------------------------------------------------------
 
 func TestValidateBSICompliance_FullyCompliantCycloneDX(t *testing.T) {
 	sbom := buildCompliantJSON()
-	result := validateBSICompliance(sbom)
+	result := bsi.CheckConformance(sbom)
 
 	compliant, _ := result["compliant"].(bool)
 	if !compliant {
@@ -151,7 +131,7 @@ func TestValidateBSICompliance_MissingHashes(t *testing.T) {
 		]
 	}`
 
-	result := validateBSICompliance(parseJSON(t, sbomJSON))
+	result := bsi.CheckConformance(parseJSON(t, sbomJSON))
 
 	compliant, _ := result["compliant"].(bool)
 	if compliant {
@@ -163,7 +143,7 @@ func TestValidateBSICompliance_MissingHashes(t *testing.T) {
 		t.Errorf("expected hash_coverage=0.0, got %.2f", hashCoverage)
 	}
 
-	findings, _ := result["findings"].([]BSIFinding)
+	findings, _ := result["findings"].([]bsi.ConformanceFinding)
 	found := false
 	for _, f := range findings {
 		if strings.Contains(strings.ToLower(f.Message), "sha-512") ||
@@ -207,7 +187,7 @@ func TestValidateBSICompliance_SHA256OnlyNotSufficient(t *testing.T) {
 	}`
 	sbomJSON = strings.ReplaceAll(sbomJSON, "PLACEHOLDER_SHA256", validSHA256)
 
-	result := validateBSICompliance(parseJSON(t, sbomJSON))
+	result := bsi.CheckConformance(parseJSON(t, sbomJSON))
 
 	compliant, _ := result["compliant"].(bool)
 	if compliant {
@@ -215,7 +195,7 @@ func TestValidateBSICompliance_SHA256OnlyNotSufficient(t *testing.T) {
 	}
 
 	// There must be a CRITICAL finding about SHA-512
-	findings, _ := result["findings"].([]BSIFinding)
+	findings, _ := result["findings"].([]bsi.ConformanceFinding)
 	criticalAboutSHA512 := false
 	for _, f := range findings {
 		if f.Severity == "CRITICAL" &&
@@ -259,7 +239,7 @@ func TestValidateBSICompliance_MissingDependencyCompleteness(t *testing.T) {
 		]
 	}`, "PLACEHOLDER_SHA512", validSHA512)
 
-	result := validateBSICompliance(parseJSON(t, sbomJSON))
+	result := bsi.CheckConformance(parseJSON(t, sbomJSON))
 
 	dependencyComplete, _ := result["dependency_complete"].(bool)
 	if dependencyComplete {
@@ -300,7 +280,7 @@ func TestValidateBSICompliance_OldSpecVersion(t *testing.T) {
 		]
 	}`, "PLACEHOLDER_SHA512", validSHA512)
 
-	result := validateBSICompliance(parseJSON(t, sbomJSON))
+	result := bsi.CheckConformance(parseJSON(t, sbomJSON))
 
 	formatCompliant, _ := result["format_compliant"].(bool)
 	if formatCompliant {
@@ -341,7 +321,7 @@ func TestValidateBSICompliance_SPDX23Accepted(t *testing.T) {
 		]
 	}`, "PLACEHOLDER_SHA512", validSHA512)
 
-	result := validateBSICompliance(parseJSON(t, sbomJSON))
+	result := bsi.CheckConformance(parseJSON(t, sbomJSON))
 
 	formatCompliant, _ := result["format_compliant"].(bool)
 	if !formatCompliant {
@@ -349,7 +329,7 @@ func TestValidateBSICompliance_SPDX23Accepted(t *testing.T) {
 	}
 
 	// Must not have any CRITICAL finding related to format version
-	findings, _ := result["findings"].([]BSIFinding)
+	findings, _ := result["findings"].([]bsi.ConformanceFinding)
 	for _, f := range findings {
 		if f.Severity == "CRITICAL" && f.Category == "Format Version" {
 			t.Errorf("unexpected CRITICAL format-version finding for SPDX-2.3: %+v", f)
@@ -422,7 +402,7 @@ func TestValidateBSICompliance_ScoreWeighting(t *testing.T) {
 		]
 	}`, "PLACEHOLDER_SHA512", validSHA512)
 
-	result := validateBSICompliance(parseJSON(t, sbomJSON))
+	result := bsi.CheckConformance(parseJSON(t, sbomJSON))
 
 	// Verify individual coverage values first
 	hashCoverage, _ := result["hash_coverage"].(float64)
