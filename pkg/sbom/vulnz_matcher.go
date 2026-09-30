@@ -84,8 +84,22 @@ func (m *vulnzMatcher) MatchComponents(components []SBOMComponent) []Vulnerabili
 		for _, name := range lookupNames {
 			entries := m.matchIdx.Lookup(name, comp.Version)
 			for _, entry := range entries {
-				if !seen[entry.cve] {
-					seen[entry.cve] = true
+				// Keyed by vulnerability AND component, not by CVE alone.
+				//
+				// Keying on the CVE alone meant that when two distinct components
+				// in one SBOM were affected by the same CVE, only the first
+				// produced a match and the second vanished from the result. The
+				// report then reads as though the second component is clean, and a
+				// fix shipped for the first appears to cover the second.
+				//
+				// A component is reachable through several lookup names -- its own
+				// name, and names derived from its PURL -- so the same CVE can
+				// legitimately be found more than once for ONE component. Those
+				// duplicate observations should merge, so deduplication is per
+				// component rather than per CVE.
+				key := exposureKey(entry.cve, comp)
+				if !seen[key] {
+					seen[key] = true
 					matches = append(matches, VulnerabilityMatch{
 						Component: comp,
 						CVE:       entry.cve,
@@ -198,4 +212,18 @@ func toString(v interface{}) string {
 		return fmt.Sprintf("%v", v)
 	}
 	return s
+}
+
+// exposureKey identifies one vulnerability-to-component relationship.
+//
+// A vulnerability alone is not a relationship: the same CVE can affect many
+// components in one SBOM, and each is a separate exposure that must be reported
+// and tracked independently. Version and type are included because two
+// components sharing a name but differing in version or ecosystem are distinct
+// products, and a fix shipped for one is not a fix for the other.
+//
+// The NUL separator cannot appear in a CVE or a component field, so no pair of
+// distinct components can collide into one key.
+func exposureKey(cve string, comp SBOMComponent) string {
+	return cve + "\x00" + comp.Name + "\x00" + comp.Version + "\x00" + comp.Type
 }

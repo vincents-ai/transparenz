@@ -216,3 +216,69 @@ func TestParseSPDXComponents_UsesSPDXID(t *testing.T) {
 	assert.Len(t, components, 1)
 	assert.Equal(t, "SPDXRef-pkg-1", components[0].Name)
 }
+
+// Two components affected by the same CVE are two separate exposures. The
+// matcher deduplicated on the CVE alone, so the second component disappeared
+// from the result entirely — the report then reads as though that component is
+// clean, and a fix shipped for the first appears to cover the second.
+func TestTwoComponentsSharingACVEBothSurvive(t *testing.T) {
+	matcher := NewVulnzMatcher()
+	vm := matcher.(*vulnzMatcher)
+	vm.matchIdx.Add("libfoo", "1.0.0", "CVE-2026-0001", "critical")
+	vm.matchIdx.Add("libbar", "2.0.0", "CVE-2026-0001", "critical")
+
+	components := []SBOMComponent{
+		{Name: "libfoo", Version: "1.0.0", Type: "library"},
+		{Name: "libbar", Version: "2.0.0", Type: "library"},
+	}
+
+	matches := matcher.MatchComponents(components)
+	assert.Len(t, matches, 2,
+		"both components are affected; dropping one makes the report understate "+
+			"the exposure")
+	seen := map[string]string{}
+	for _, m := range matches {
+		seen[m.Component.Name] = m.CVE
+	}
+	assert.Equal(t, "CVE-2026-0001", seen["libfoo"])
+	assert.Equal(t, "CVE-2026-0001", seen["libbar"])
+}
+
+// A component is reachable through several lookup names — its own name and
+// names derived from its PURL — so the same CVE can be found more than once for
+// one component. Those duplicate observations must merge rather than produce
+// phantom rows.
+func TestDuplicateObservationsOfOneComponentMerge(t *testing.T) {
+	matcher := NewVulnzMatcher()
+	vm := matcher.(*vulnzMatcher)
+	vm.matchIdx.Add("express", "4.17.1", "CVE-2024-1234", "critical")
+	vm.matchIdx.Add("express", "4.17.1", "CVE-2024-1234", "critical")
+
+	components := []SBOMComponent{
+		{Name: "express", Version: "4.17.1", Type: "library", PURL: "pkg:npm/express@4.17.1"},
+	}
+
+	matches := matcher.MatchComponents(components)
+	assert.Len(t, matches, 1,
+		"two feeds reporting the same relationship for one component is one exposure")
+}
+
+// Components sharing a name but differing in version or ecosystem are different
+// products, and a fix shipped for one is not a fix for the other.
+func TestSameNameDifferentVersionOrEcosystemStaysDistinct(t *testing.T) {
+	old := SBOMComponent{Name: "openssl", Version: "1.0.0", Type: "library"}
+	fixed := SBOMComponent{Name: "openssl", Version: "3.0.0", Type: "library"}
+	assert.NotEqual(t, exposureKey("CVE-2026-0002", old), exposureKey("CVE-2026-0002", fixed))
+
+	npm := SBOMComponent{Name: "glob", Version: "7.0.0", Type: "npm"}
+	maven := SBOMComponent{Name: "glob", Version: "7.0.0", Type: "maven"}
+	assert.NotEqual(t, exposureKey("CVE-2026-0003", npm), exposureKey("CVE-2026-0003", maven))
+
+	// And the same component is stable, so duplicate observations collapse.
+	assert.Equal(t, exposureKey("CVE-2026-0004", npm), exposureKey("CVE-2026-0004", npm))
+
+	// Field boundaries are preserved by the NUL separator.
+	assert.NotEqual(t,
+		exposureKey("CVE-1", SBOMComponent{Name: "a", Version: "bc"}),
+		exposureKey("CVE-1", SBOMComponent{Name: "ab", Version: "c"}))
+}
