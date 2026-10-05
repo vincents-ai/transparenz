@@ -77,4 +77,3 @@ func (v *validator) Validate(sbomJSON string) (*ValidationResult, error) {
 
 	return result, nil
 }
-

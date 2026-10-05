@@ -57,9 +57,9 @@ func TestValidate_DelegatesToCanonicalConformance(t *testing.T) {
 	foundHashFinding := false
 	for _, f := range result.Findings {
 		if f.Severity == "critical" || f.Severity == "CRITICAL" {
-				foundHashFinding = true
-				break
-			}
+			foundHashFinding = true
+			break
+		}
 	}
 	if !foundHashFinding {
 		t.Fatalf("expected a CRITICAL hash finding, got %+v", result.Findings)

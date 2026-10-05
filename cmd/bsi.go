@@ -6,8 +6,8 @@ import (
 	"os"
 	"strings"
 
-	"github.com/vincents-ai/transparenz/pkg/bsi"
 	"github.com/spf13/cobra"
+	"github.com/vincents-ai/transparenz/pkg/bsi"
 )
 
 var (
@@ -125,8 +125,6 @@ Example usage:
 		return nil
 	},
 }
-
-
 
 func init() {
 	rootCmd.AddCommand(bsiCmd)
